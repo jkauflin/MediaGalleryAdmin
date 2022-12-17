@@ -1,10 +1,32 @@
 ﻿@page
 @model IndexModel
 @{
-    ViewData["Title"] = "Home page";
+    //ViewData["Title"] = "Home page";
 }
 
-<div class="text-center">
-    <h1 class="display-4">Welcome</h1>
-    <p>Learn about <a href="https://docs.microsoft.com/aspnet/core">building Web apps with ASP.NET Core</a>.</p>
+<div class="tab-content">
+    <div class="tab-pane show active" id="HomePage">
+
+        <form id="InputValues" action="#">
+            <div class="row">
+                <div class="col-4">
+                    <div class="form-floating m-3">
+                        <input id="targetTemperature" type="number" class="form-control">
+                        <label for="targetTemperature">Target temp</label>
+                    </div>
+                    <button id="UpdateButton" type="button" class="btn btn-primary m-2">Update</button>
+                    <button id="FileTransferButton" type="button" class="btn btn-success m-2">Transfer Files</button>
+                </div>
+
+                <div class="col-8">
+                    <textarea id="LogMessageDisplay" class="form-control form-control-sm mt-3 " rows="23" readonly>
+                        </textarea>
+                </div>
+            </div>
+        </form>
+
+        <div id="UpdateDisplay" class="m-2"></div>
+
+    </div>
 </div>
+

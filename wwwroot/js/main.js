@@ -18,6 +18,7 @@
  * 2022-05-31 JJK   Updated to use newest fetch ideas for lookup and update,
  *                  and converted to use straight javascript
  * 2022-10-20 JJK   Re-implemented websocket connection to display async log
+ * 2022-12-17 JJK   Re-implemented using .NET 6 C# backend server
  *============================================================================*/
 var main = (function () {
     'use strict';
@@ -31,8 +32,8 @@ var main = (function () {
     //=================================================================================================================
     // Module methods
     function _fileTransfer(event) {
-        document.getElementById("LogMessageDisplay").innerHTML = ""
-        fetch('FileTransfer')
+        document.getElementById("LogMessageDisplay").innerHTML = "Starting File Transfer"
+        _executeServerTask("FileTransfer")
     }
 
     function _update(event) {
@@ -60,20 +61,14 @@ var main = (function () {
         });
     }
 
-    // General function to send the botMessageStr to the server if Websocket is connected
-    /*
-    function sendCommand(botMessageStr) {
-        //console.log("in sendCommand, wsConnected = "+wsConnected);
-        if (wsConnected) {
-            console.log(">>> sendCommand, botMessage = "+botMessageStr);
-            ws.send(botMessageStr);
-        }
-    }
-    */
-    // Try to establish a websocket connection with the server
-    _connectToServer();
-    function _connectToServer() {
-        var ws = new WebSocket("ws://localhost:3045");
+    // Try to establish a websocket connection with the server to execute a task
+    function _executeServerTask(taskName) {
+        var scheme = document.location.protocol === "https:" ? "wss" : "ws";
+        var port = document.location.port ? (":" + document.location.port) : "";
+        var connectionUrl = scheme + "://" + document.location.hostname + port + "/ws?taskName=" + taskName;
+        var ws = new WebSocket(connectionUrl);
+        //var ws = new WebSocket("ws://localhost:3045");
+
         // event emmited when connected
         ws.onopen = function () {
             //console.log('websocket is connected ...')
@@ -90,14 +85,24 @@ var main = (function () {
             //console.log(">>> messageEvent.data = "+messageEvent.data)
             //document.getElementById("LogMessageDisplay").innerHTML += messageEvent.data + '<br>'
             var objDiv = document.getElementById("LogMessageDisplay")
-            objDiv.innerHTML += messageEvent.data + '&#13;&#10;'
+            objDiv.innerHTML += '&#13;&#10;' + messageEvent.data;
             objDiv.scrollTop = objDiv.scrollHeight;
         } // on message (from server)
 
         ws.onclose = function () {
-            //console.log("on close in the client")
+            //console.log("!!!!! onclose in the client")
         } // on message (from server)
     }
+
+    function htmlEscape(str) {
+        return str.toString()
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
+
 
     //=================================================================================================================
     // This is what is exposed from this Module
