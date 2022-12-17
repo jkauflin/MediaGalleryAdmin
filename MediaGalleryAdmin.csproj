@@ -10,4 +10,8 @@
     <Folder Include="wwwroot\lib\" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="MySqlConnector" Version="2.2.2" />
+  </ItemGroup>
+
 </Project>
