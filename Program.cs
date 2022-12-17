@@ -1,8 +1,12 @@
 using System.Net;
 using System.Net.WebSockets;
+using System.Reflection;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Configuration.AddEnvironmentVariables()
+                     .AddUserSecrets(Assembly.GetExecutingAssembly(), true);
 
 // Add services to the container.
 builder.Services.AddControllers();
@@ -27,7 +31,7 @@ app.UseAuthorization();
 // <snippet_UseWebSockets>
 var webSocketOptions = new WebSocketOptions
 {
-    KeepAliveInterval = TimeSpan.FromMinutes(2)
+    KeepAliveInterval = TimeSpan.FromMinutes(1)
 };
 app.UseWebSockets(webSocketOptions);
 // </snippet_UseWebSockets>

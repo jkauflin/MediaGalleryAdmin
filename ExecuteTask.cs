@@ -29,9 +29,12 @@ namespace MediaGalleryAdmin
     public class ExecuteTask
     {
         private static WebSocket? webSocket;
-        public ExecuteTask(WebSocket inWebSocket)
+        private static string? dbConnStr;
+
+        public ExecuteTask(WebSocket inWebSocket, string inDbConnStr)
         {
             webSocket = inWebSocket;
+            dbConnStr = inDbConnStr;
         }
 
         public void FileTransfer()
@@ -126,6 +129,10 @@ namespace MediaGalleryAdmin
             */
 
 
+            using (var mysqlconnection = new MySqlConnection(dbConnStr))
+            {
+                mysqlconnection.Open();
+            }
 
 
             log("END of task");

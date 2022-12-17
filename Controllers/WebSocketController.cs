@@ -13,7 +13,8 @@
  *                  and converted to use straight javascript
  * 2022-10-20 JJK   Re-implemented websocket connection to display async log
  * 2022-12-17 JJK   Re-implemented using .NET 6 C# backend server instead of
- *                  nodejs
+ *                  nodejs.  Got User Secrets, Configuration injection, 
+ *                  and connection string for remote MySQL working
  *============================================================================*/
 using System.Net.WebSockets;
 using System.Text;
@@ -23,13 +24,20 @@ namespace MediaGalleryAdmin.Controllers;
 
 public class WebSocketController : ControllerBase
 {
+    public IConfiguration _configuration;
+    public WebSocketController (IConfiguration configuration)
+    {
+        _configuration = configuration;
+    }
+
     [HttpGet("/ws")]
     public async Task Get(string taskName)
     {
         if (HttpContext.WebSockets.IsWebSocketRequest)
         {
             using var webSocket = await HttpContext.WebSockets.AcceptWebSocketAsync();
-            ExecuteTask executeTask = new ExecuteTask(webSocket);
+            // Instantiate object to execute tasks passing it a websocket object, and the DB connection string
+            ExecuteTask executeTask = new ExecuteTask(webSocket, _configuration["dbConnStr"]);
             if (taskName.Equals("FileTransfer"))
             {
                 executeTask.FileTransfer();
