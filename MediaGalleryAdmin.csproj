@@ -12,7 +12,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="FluentFTP" Version="42.1.0" />
     <PackageReference Include="MySqlConnector" Version="2.2.2" />
+    <PackageReference Include="NLog.Web.AspNetCore" Version="5.2.0" />
+	<PackageReference Include="NLog" Version="5.*" />
   </ItemGroup>
 
 </Project>

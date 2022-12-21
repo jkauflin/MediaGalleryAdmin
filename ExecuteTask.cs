@@ -13,23 +13,37 @@
  * 2021-07-03 JJK   Added logic to create the remote directory if missing
  * 2021-10-30 JJK   Modified to save a last completed timestamp and look for files with a timestamp greater than last run
  * 2022-10-20 JJK   Re-implemented websocket connection to display async log
- * 2022-12-17 JJK   Re-implemented using .NET 6 C# backend server instead ofnodejs
+ * 2022-12-17 JJK   Re-implemented using .NET 6 C# backend server instead of nodejs
+ * 2022-12-18 JJK   (Argentina beats France to win world cup)  Implemented
+ *                  recursive walk through of directories and verified the
+ *                  recursive "queue" completes before the first call returns
+ *                  (unlike nodejs)
+ * 2022-12-19 JJK   Got MySQL queries to work on ConfigParam
+ * 2022-12-20 JJK   Got FTP functions, and LastRunDate parameter update working
  *============================================================================*/
 using System;
+using System.Collections;
 using System.Data;
 using System.Diagnostics;
 using System.IO;
 using System.Net.WebSockets;
+using System.Reflection;
+using System.Reflection.Emit;
 using System.Text;
-
+using FluentFTP;
 using MySqlConnector;
+using static System.Net.WebRequestMethods;
 
 namespace MediaGalleryAdmin
 {
     public class ExecuteTask
     {
+        private static readonly Stopwatch timer = new Stopwatch();
         private static WebSocket? webSocket;
         private static string? dbConnStr;
+        //private static System.Collections.Specialized.StringCollection log = new System.Collections.Specialized.StringCollection();
+        private static DateTime lastRunDate;
+        private static ArrayList fileList = new ArrayList();
 
         public ExecuteTask(WebSocket inWebSocket, string inDbConnStr)
         {
@@ -39,241 +53,262 @@ namespace MediaGalleryAdmin
 
         public void FileTransfer()
         {
-            log($"Beginning task FileTransfer");
-
-            // Need ENVIRONMENT variables for file path and FTP credentials (and DB credentials?)
-            // *** maybe store task parameters in the DB, and show them in the web screen (for adjustment) before the run
-
-            /*
-            fs.readFile(lastRunFilename, function(err, buf) {
-                if (!err)
-                {
-                    lastRunTimestamp = new Date(buf.toString());
-                }
-                log("Last Run Timestamp = " + lastRunTimestamp);
-
-                if (process.env.LAST_RUN_TIMESTAMP_OVERRIDE != undefined)
-                {
-                    log("LAST_RUN_TIMESTAMP_OVERRIDE = " + process.env.LAST_RUN_TIMESTAMP_OVERRIDE);
-                    lastRunTimestamp = new Date(process.env.LAST_RUN_TIMESTAMP_OVERRIDE);
-                    log("Last Run Timestamp = " + lastRunTimestamp);
-                }
-                // Start the walkSync to load all the files into the filelist array
-
-                fileList = walkSync(process.env.LOCAL_PHOTOS_ROOT + process.env.PHOTOS_START_DIR);
-                //for (var i = 0, len = fileList.length; i < len; i++) {
-                //    console.log("fileList[" + i + "] = " + fileList[i]);
-                //}
-                if (fileList.length > 0)
-                {
-                    startTransfer();
-                }
-                else
-                {
-                    log("No new pictures found")
-                    log("")
-                }
-            });
-            */
-
-
-
-            // List all files in a directory in Node.js recursively in a synchronous fashion
-            /*
-            var filepath = '';
-            var extension = '';
-            var fileInfo = null;
-            const lastRunFilename = 'lastRunTimestamp.log';
-            var lastRunTimestamp = new Date('May 27, 95 00:00:00 GMT-0400');
-            var fileList = null;
-            */
-
-
-
-            /*
-            files = fs.readdirSync(dir,['utf8', 'true']);
-            filelist = filelist || [];
-            files.forEach(function(file) {
-                filepath = dir + '/' + file;
-                fileInfo = fs.statSync(filepath);
-
-                if (fileInfo.isDirectory())
-                {
-                    filelist = walkSync(filepath, filelist);
-                }
-                else
-                {
-                    // Only add support file types to the list
-                    extension = file.substring(file.lastIndexOf(".") + 1).toUpperCase();
-                    if (extension == "JPEG" || extension == "JPG" || extension == "PNG" || extension == "GIF")
-
-                        // File Last Modified
-                        // fileInfo.mtime = Sat Oct 30 2021 09:50:11 GMT-0400 (Eastern Daylight Time)
-                        //console.log(filepath);
-                        //console.log("fileInfo.mtime = "+fileInfo.mtime+", "+lastRunTimestamp);
-                        //console.log("fileInfo.ctime = "+fileInfo.ctime);
-                        //console.log("fileInfo.atime = "+fileInfo.atime);
-
-                        // Add to the list if the Created or Modified time is greater than the last run time
-                        if (fileInfo.ctime.getTime() > lastRunTimestamp.getTime() ||
-                            fileInfo.mtime.getTime() > lastRunTimestamp.getTime())
-                        {
-                            // Add the path minus the LOCAL ROOT
-                            //console.log("Adding file = "+file);
-                            filelist.push(dir.replace(process.env.LOCAL_PHOTOS_ROOT, '') + '/' + file);
-                        }
-                    }
-                }
-            });
-            return filelist;
-            */
-
-
-            using (var mysqlconnection = new MySqlConnection(dbConnStr))
+            try
             {
-                mysqlconnection.Open();
+                timer.Start();
+                log($"Beginning of FileTransfer");
+
+                string ftpHost = GetConfigParamValue("FTP_HOST");
+                string ftpUser = GetConfigParamValue("FTP_USER");
+                string ftpPass = GetConfigParamValue("FTP_PASS");
+                string webRoolUrl = GetConfigParamValue("WEB_ROOT_URL");
+                string localPhotosRoot = GetConfigParamValue("LOCAL_PHOTOS_ROOT");
+                string remotePhotosRoot = GetConfigParamValue("REMOTE_PHOTOS_ROOT");
+                string photosStartDir = GetConfigParamValue("PHOTOS_START_DIR");
+
+                lastRunDate = DateTime.Parse(GetConfigParamValue("LastRunDate"));
+                log($"Last Run = {lastRunDate.ToString("MM/dd/yyyy HH:mm:ss")}");
+                var startDateTime = DateTime.Now.ToString("MM/dd/yyyy HH:mm:ss");
+
+                // Start the recursive function (which will only complete when all subsequent recursive calls are done)
+                var root = new DirectoryInfo(localPhotosRoot + photosStartDir);
+                fileList.Clear();
+                WalkDirectoryTree(root);
+
+                if (fileList.Count == 0)
+                {
+                    log("No new files found");
+                    return;
+                }
+
+                DateTime remoteFileModifiedDateTime;
+                bool fileExists;
+                bool fileModified = false;
+                bool dirExists;
+                using (var ftpConn = new FtpClient(ftpHost, ftpUser, ftpPass))
+                {
+                    ftpConn.Config.EncryptionMode = FtpEncryptionMode.Explicit;
+                    ftpConn.Config.ValidateAnyCertificate = true;
+                    ftpConn.Connect();
+
+                    if (!ftpConn.DirectoryExists(remotePhotosRoot))
+                    {
+                        log($"Remote FTP directory ROOT does not exist, dir = {remotePhotosRoot}");
+                        return;
+                    }
+
+                    ftpConn.SetWorkingDirectory(remotePhotosRoot);
+                    string fileNameAndPath;
+                    string dirPath;
+                    int index = 0;
+                    foreach (FileInfo fi in fileList)
+                    {
+                        index++;
+                        fileNameAndPath = fi.FullName.Substring(localPhotosRoot.Length);
+                        dirPath = "";
+                        if (!String.IsNullOrEmpty(fi.DirectoryName))
+                        {
+                            dirPath = fi.DirectoryName.Substring(localPhotosRoot.Length);
+                        }
+
+                        log($"{index} of {fileList.Count}, {fileNameAndPath}");
+
+                        fileExists = false;
+                        fileModified = false;
+                        dirExists = false;
+                        try
+                        {
+                            fileExists = ftpConn.FileExists(fileNameAndPath);
+                            dirExists = true;
+                        }
+                        catch (Exception ex)
+                        {
+                            if (ex.Message.Contains("No such file or directory"))
+                            {
+                                dirExists = false;
+                            }
+                            else
+                            {
+                                log(ex.Message);
+                                throw;
+                            }
+                        }
+
+                        if (!dirExists)
+                        {
+                            //log($"    Create Dir = {dirPath}");
+                            ftpConn.CreateDirectory(dirPath, true);
+                        }
+
+                        if (fileExists)
+                        {
+                            remoteFileModifiedDateTime = ftpConn.GetModifiedTime(fileNameAndPath);
+                            if (fi.LastWriteTime > remoteFileModifiedDateTime)
+                            {
+                                fileModified = true;
+                            }
+                            else
+                            {
+                                // compare the downloaded file with the server
+                                if (ftpConn.CompareFile(fi.FullName, fileNameAndPath) != FtpCompareResult.Equal) 
+                                {
+                                    fileModified = true;
+                                }
+                            }
+                        }
+
+                        if (!fileExists || fileModified)
+                        {
+                            ftpConn.Config.RetryAttempts = 3;
+                            ftpConn.UploadFile(fi.FullName, fileNameAndPath, FtpRemoteExists.Overwrite, false, FtpVerify.Retry);
+
+                            // Create thumbnails
+                        }
+                    } // foreach (FileInfo fi in fileList)
+
+                    ftpConn.Disconnect();
+                } // using (var ftpConn = new FtpClient(ftpHost, ftpUser, ftpPass))
+
+                // Update LastRunDate with the startDateTime from this run
+                UpdConfigParamValue("LastRunDate", startDateTime);
+
+                timer.Stop();
+                log($"END of FileTransfer, elapsed time = {timer.Elapsed.ToString()}");
+            }
+            catch (Exception ex)
+            {
+                log($"*** Error occurred, message = {ex.Message}");
             }
 
-
-            log("END of task");
         } // public void FileTransfer()
 
 
-        private string GetValueFromDBUsing(string strQuery)
+        private static void WalkDirectoryTree(DirectoryInfo root)
+        {
+            FileInfo[] files = null;
+            DirectoryInfo[] subDirs = null;
+
+            // First, process all the files directly under this folder
+            try
+            {
+                files = root.GetFiles("*.*");
+            }
+            // This is thrown if even one of the files requires permissions greater
+            // than the application provides.
+            catch (UnauthorizedAccessException e)
+            {
+                // This code just writes out the message and continues to recurse.
+                // You may decide to do something different here. For example, you
+                // can try to elevate your privileges and access the file again.
+                log(e.Message);
+            }
+            catch (DirectoryNotFoundException e)
+            {
+                log(e.Message);
+            }
+
+
+            if (files != null)
+            {
+                string ext;
+                foreach (FileInfo fi in files)
+                {
+                    ext = fi.Extension.ToUpper();
+                    // Add only supported file types to the list
+                    if (ext.Equals(".JPEG") || ext.Equals(".JPG") || ext.Equals(".PNG") || ext.Equals(".GIF"))
+                    {
+                        if (fi.LastWriteTime > lastRunDate)
+                        {
+                            //log($"Adding file = {fi.Name}");
+                            //fileCnt++;
+                            fileList.Add(fi);
+                        }
+                    }
+                } // foreach (FileInfo fi in files)
+
+                // Now find all the subdirectories under this directory.
+                subDirs = root.GetDirectories();
+
+                foreach (DirectoryInfo dirInfo in subDirs)
+                {
+                    // Resursive call for each subdirectory.
+                    WalkDirectoryTree(dirInfo);
+                }
+            }
+        }
+
+        private string GetConfigParamValue(string configParamName)
         {
             string strData = "";
 
             try
             {
-                if (string.IsNullOrEmpty(strQuery) == true)
-                    return string.Empty;
-
-                using (var mysqlconnection = new MySqlConnection("Server=myserver;User ID=mylogin;Password=mypass;Database=mydatabase"))
+                if (string.IsNullOrEmpty(configParamName))
                 {
-                    mysqlconnection.Open();
-                    using (MySqlCommand cmd = mysqlconnection.CreateCommand())
-                    {
-                        cmd.CommandType = CommandType.Text;
-                        cmd.CommandTimeout = 300;
-                        cmd.CommandText = strQuery;
-
-                        object objValue = cmd.ExecuteScalar();
-                        if (objValue == null)
-                        {
-                            cmd.Dispose();
-                            return string.Empty;
-                        }
-                        else
-                        {
-                            strData = (string)cmd.ExecuteScalar();
-                            cmd.Dispose();
-                        }
-
-                        mysqlconnection.Close();
-
-                        if (strData == null)
-                            return string.Empty;
-                        else
-                            return strData;
-                    }
+                    return string.Empty;
                 }
+
+                using (var conn = new MySqlConnection(dbConnStr))
+                {
+                    conn.Open();
+
+                    using var command = new MySqlCommand("SELECT ConfigValue FROM ConfigParam WHERE ConfigName = @ConfigName", conn);
+                    command.Parameters.AddWithValue("@ConfigName", configParamName);
+                    using var reader = command.ExecuteReader();
+                    while (reader.Read())
+                    {
+                        strData = reader.GetString(0);
+                    }
+                    
+                    conn.Close();
+                }
+                return strData;
             }
             catch (MySqlException ex)
             {
-                //LogException(ex);
+                log(ex.Message);
                 return string.Empty;
             }
             catch (Exception ex)
             {
-                //LogException(ex);
+                log(ex.Message);
                 return string.Empty;
-            }
-            finally
-            {
-
             }
         }
 
-        public class RecursiveFileSearch
+        private void UpdConfigParamValue(string configName, string configValue)
         {
-            static System.Collections.Specialized.StringCollection log = new System.Collections.Specialized.StringCollection();
-
-            static void Main()
+            try
             {
-                // Start with drives if you have to search the entire computer.
-                string[] drives = System.Environment.GetLogicalDrives();
-
-                foreach (string dr in drives)
+                if (string.IsNullOrEmpty(configName))
                 {
-                    System.IO.DriveInfo di = new System.IO.DriveInfo(dr);
+                    return;
+                }
 
-                    // Here we skip the drive if it is not ready to be read. This
-                    // is not necessarily the appropriate action in all scenarios.
-                    if (!di.IsReady)
+                using (var conn = new MySqlConnection(dbConnStr))
+                {
+                    conn.Open();
+                    using (var cmd = new MySqlCommand())
                     {
-                        Console.WriteLine("The drive {0} could not be read", di.Name);
-                        continue;
+                        cmd.Connection = conn;
+                        cmd.CommandText = "UPDATE ConfigParam SET ConfigValue = @ConfigValue WHERE ConfigName = @ConfigName;  ";
+                        cmd.Parameters.AddWithValue("ConfigValue", configValue);
+                        cmd.Parameters.AddWithValue("ConfigName", configName);
+                        cmd.ExecuteNonQuery();
                     }
-                    System.IO.DirectoryInfo rootDir = di.RootDirectory;
-                    WalkDirectoryTree(rootDir);
+                    conn.Close();
                 }
-
-                // Write out all the files that could not be processed.
-                Console.WriteLine("Files with restricted access:");
-                foreach (string s in log)
-                {
-                    Console.WriteLine(s);
-                }
-                // Keep the console window open in debug mode.
-                Console.WriteLine("Press any key");
-                Console.ReadKey();
+                return;
             }
-
-            static void WalkDirectoryTree(System.IO.DirectoryInfo root)
+            catch (MySqlException ex)
             {
-                System.IO.FileInfo[] files = null;
-                System.IO.DirectoryInfo[] subDirs = null;
-
-                // First, process all the files directly under this folder
-                try
-                {
-                    files = root.GetFiles("*.*");
-                }
-                // This is thrown if even one of the files requires permissions greater
-                // than the application provides.
-                catch (UnauthorizedAccessException e)
-                {
-                    // This code just writes out the message and continues to recurse.
-                    // You may decide to do something different here. For example, you
-                    // can try to elevate your privileges and access the file again.
-                    log.Add(e.Message);
-                }
-
-                catch (System.IO.DirectoryNotFoundException e)
-                {
-                    Console.WriteLine(e.Message);
-                }
-
-                if (files != null)
-                {
-                    foreach (System.IO.FileInfo fi in files)
-                    {
-                        // In this example, we only access the existing FileInfo object. If we
-                        // want to open, delete or modify the file, then
-                        // a try-catch block is required here to handle the case
-                        // where the file has been deleted since the call to TraverseTree().
-                        Console.WriteLine(fi.FullName);
-                    }
-
-                    // Now find all the subdirectories under this directory.
-                    subDirs = root.GetDirectories();
-
-                    foreach (System.IO.DirectoryInfo dirInfo in subDirs)
-                    {
-                        // Resursive call for each subdirectory.
-                        WalkDirectoryTree(dirInfo);
-                    }
-                }
+                log(ex.Message);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                log(ex.Message);
+                throw;
             }
         }
 
