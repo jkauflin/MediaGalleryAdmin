@@ -37,6 +37,9 @@
  * 2022-12-21 JJK   Got https GET working for CreateThumbnail call
  * 2022-12-22 JJK   Moved the execution tasks into the Controller (to take 
  *                  advantage of the injected logger)
+ * 2022-12-23 JJK   Working on update file info (to new DB table)
+ * 2022-12-24 JJK   Implemented a Dictionary to hold config keys and values
+ * 2022-12-27 JJK   Implemented micro-ORM to do database work (see Model)
  *============================================================================*/
 using System;
 using System.Collections;
@@ -53,7 +56,8 @@ using Microsoft.AspNetCore.Mvc;
 using FluentFTP;
 using MySqlConnector;
 using static System.Net.WebRequestMethods;
-
+using MediaGalleryAdmin.Model;
+using System.Reflection.PortableExecutable;
 
 namespace MediaGalleryAdmin.Controllers;
 
@@ -70,6 +74,8 @@ public class WebSocketController : ControllerBase
     private static ArrayList fileList = new ArrayList();
     private static HttpClient httpClient = new HttpClient();
 
+    private static Dictionary<string, string> configParamDict = new Dictionary<string, string>();
+
     public WebSocketController (IConfiguration configuration, ILogger<WebSocketController> logger)
     {
         _configuration = configuration;
@@ -83,16 +89,16 @@ public class WebSocketController : ControllerBase
         if (HttpContext.WebSockets.IsWebSocketRequest)
         {
             _log.LogInformation(">>> Accepting WebSocket request");
-            //using var webSocket = await HttpContext.WebSockets.AcceptWebSocketAsync();
             webSocket = await HttpContext.WebSockets.AcceptWebSocketAsync();
             dbConnStr = _configuration["dbConnStr"];
-
-            // Instantiate object to execute tasks passing it a websocket object, and the DB connection string
-            //ExecuteTask executeTask = new ExecuteTask(webSocket, _configuration["dbConnStr"]);
+            LoadConfigParam();
 
             if (taskName.Equals("FileTransfer"))
             {
                 FileTransfer();
+            } else if (taskName.Equals("UpdateFileInfo"))
+            {
+                UpdateFileInfo();
             }
 
             // Close the websocket after completion
@@ -106,8 +112,8 @@ public class WebSocketController : ControllerBase
 
     private void log(string dataStr)
     {
+        Console.WriteLine(dataStr);
         _log.LogInformation(dataStr);
-
         if (webSocket != null)
         {
             var encoded = Encoding.UTF8.GetBytes(dataStr);
@@ -115,6 +121,116 @@ public class WebSocketController : ControllerBase
             webSocket.SendAsync(buffer, WebSocketMessageType.Text, true, CancellationToken.None);
         }
     }
+
+
+    private void UpdateFileInfo()
+    {
+        try
+        {
+            log($"Beginning of Update File Info");
+            timer.Start();
+
+            // re-write to get these all in the same transaction (maybe load into a dictionary)
+            string localPhotosRoot = configParamDict["LOCAL_PHOTOS_ROOT"];
+            string photosStartDir = configParamDict["PHOTOS_START_DIR"];
+
+            //lastRunDate = DateTime.Parse(configParamDict["LastRunDate"]);
+            // For TESTING
+            lastRunDate = DateTime.Parse("01/01/2000");
+            log($"Last Run = {lastRunDate.ToString("MM/dd/yyyy HH:mm:ss")}");
+            var startDateTime = DateTime.Now.ToString("MM/dd/yyyy HH:mm:ss");
+
+            var root = new DirectoryInfo(localPhotosRoot + photosStartDir);
+            fileList.Clear();
+            // Start the recursive function (which will only complete when all subsequent recursive calls are done)
+            WalkDirectoryTree(root);
+
+            if (fileList.Count == 0)
+            {
+                log("No new files found");
+                return;
+            }
+
+            int index = 0;
+            FileInfo fi;
+            FileInfoTable fiRec;
+            string fileNameAndPath;
+            int pos;
+            string tempStr;
+            string category;
+            DateTime taken;
+            var mgr = new MediaGalleryRepository(null);
+            while (index < fileList.Count)
+            {
+                fi = (FileInfo)fileList[index];
+                log($"{index + 1} of {fileList.Count}, {fi.FullName}");
+
+                fileNameAndPath = fi.FullName.Substring(localPhotosRoot.Length).Replace(@"\", @"/");
+                pos = fileNameAndPath.IndexOf(@"/");
+                tempStr = fileNameAndPath.Substring(pos+1);
+                pos = tempStr.IndexOf(@"/");
+                category = tempStr.Substring(0,pos);
+                taken = DateTime.Now;
+                
+                using (var conn = new MySqlConnection(dbConnStr))
+                {
+                    conn.Open();
+                    mgr.setConnection(conn);
+                    fiRec = mgr.getFileInfoTable(fi.Name);
+                    if (fiRec != null)
+                    {
+                        // Update
+                        fiRec.Category = category;
+                        fiRec.FullNameLocal = fi.FullName;
+                        fiRec.NameAndPath = fileNameAndPath;
+                        fiRec.CreateDateTime = fi.CreationTime;
+                        fiRec.LastModified = fi.LastWriteTime;
+                        //fiRec.TakenDateTime = taken;
+                        //fiRec.Title = "Title";
+                        //fiRec.Description = "Description";
+                        //fiRec.People = "People";
+                        fiRec.ToBeProcessed = 1;
+                        mgr.updateFileInfoTable(fiRec);
+                    }
+                    else
+                    {
+                        // Insert
+                        fiRec = new FileInfoTable();
+                        fiRec.Name = fi.Name;
+                        fiRec.Category = category;
+                        fiRec.FullNameLocal = fi.FullName;
+                        fiRec.NameAndPath = fileNameAndPath;
+                        fiRec.CreateDateTime = fi.CreationTime;
+                        fiRec.LastModified = fi.LastWriteTime;
+                        fiRec.TakenDateTime = taken;
+                        fiRec.Title = "Title";
+                        fiRec.Description = "Description";
+                        fiRec.People = "People";
+                        fiRec.ToBeProcessed = 1;
+                        mgr.insertFileInfoTable(fiRec);
+                    }
+                    
+                    conn.Close();
+                }
+                
+                // Increment to the next file if all operations were successful
+                index++;
+            } // Loop through the file list
+
+
+            // Update LastRunDate with the startDateTime from this run
+            UpdConfigParamValue("LastRunDate", startDateTime);
+
+            timer.Stop();
+            log($"END elapsed time = {timer.Elapsed.ToString()}");
+        }
+        catch (Exception ex)
+        {
+            log($"*** Error: {ex.Message}");
+            log($"END elapsed time = {timer.Elapsed.ToString()}");
+            throw;
+        }
+    } // private void updateFileInfo()
 
 
     public void FileTransfer()
@@ -125,13 +241,13 @@ public class WebSocketController : ControllerBase
             timer.Start();
 
             // re-write to get these all in the same transaction (maybe load into a dictionary)
-            string ftpHost = GetConfigParamValue("FTP_HOST");
-            string ftpUser = GetConfigParamValue("FTP_USER");
-            string ftpPass = GetConfigParamValue("FTP_PASS");
-            string webRoolUrl = GetConfigParamValue("WEB_ROOT_URL");
-            string localPhotosRoot = GetConfigParamValue("LOCAL_PHOTOS_ROOT");
-            string remotePhotosRoot = GetConfigParamValue("REMOTE_PHOTOS_ROOT");
-            string photosStartDir = GetConfigParamValue("PHOTOS_START_DIR");
+            string ftpHost = configParamDict["FTP_HOST"];
+            string ftpUser = configParamDict["FTP_USER"];
+            string ftpPass = configParamDict["FTP_PASS"];
+            string webRoolUrl = configParamDict["WEB_ROOT_URL"];
+            string localPhotosRoot = configParamDict["LOCAL_PHOTOS_ROOT"];
+            string remotePhotosRoot = configParamDict["REMOTE_PHOTOS_ROOT"];
+            string photosStartDir = configParamDict["PHOTOS_START_DIR"];
 
             /* This doesn' seem to work - had to use full URL in call
             httpClient = new()
@@ -140,7 +256,7 @@ public class WebSocketController : ControllerBase
             };
             */
 
-            lastRunDate = DateTime.Parse(GetConfigParamValue("LastRunDate"));
+            lastRunDate = DateTime.Parse(configParamDict["LastRunDate"]);
             // For TESTING
             //lastRunDate = DateTime.Parse("01/01/2000");
             log($"Last Run = {lastRunDate.ToString("MM/dd/yyyy HH:mm:ss")}");
@@ -177,7 +293,7 @@ public class WebSocketController : ControllerBase
 
                 ftpConn.SetWorkingDirectory(remotePhotosRoot);
                 string fileNameAndPath;
-                string dirPath;
+                //string dirPath;
                 string createThumbnailUrl;
                 int index = 0;
                 FileInfo fi;
@@ -186,11 +302,13 @@ public class WebSocketController : ControllerBase
                 {
                     fi = (FileInfo)fileList[index];
                     fileNameAndPath = fi.FullName.Substring(localPhotosRoot.Length).Replace(@"\", @"/");
+                    /*
                     dirPath = "";
                     if (!String.IsNullOrEmpty(fi.DirectoryName))
                     {
                         dirPath = fi.DirectoryName.Substring(localPhotosRoot.Length);
                     }
+                    */
                     log($"{index + 1} of {fileList.Count}, {fileNameAndPath}");
 
                     try
@@ -201,17 +319,22 @@ public class WebSocketController : ControllerBase
                         ftpConn.UploadFile(fi.FullName, fileNameAndPath, FtpRemoteExists.Overwrite, true, FtpVerify.Retry);
 
                         // Make an HTTPS GET call to create the thumbnail and smaller files
-                        createThumbnailUrl = GetConfigParamValue("WEB_ROOT_URL") + "/vendor/jkauflin/jjkgallery/createThumbnail.php?filePath=" + fileNameAndPath;
+                        createThumbnailUrl = webRoolUrl + "/vendor/jkauflin/jjkgallery/createThumbnail.php?filePath=" + fileNameAndPath;
                         GetAsync(createThumbnailUrl).Wait();
                         // Increment to the next file if all operations were successful
                         index++;
                     }
                     catch (Exception ex)
                     {
-                        _log.LogError(ex,"Error in file processing");
+                        _log.LogError(ex, "Error in file processing");
+                        string exMessage = ex.Message;
+                        if (ex.InnerException != null)
+                        {
+                            exMessage = exMessage + " " + ex.InnerException.Message;
+                        }
 
                         //InnerException = Code: 550 Message: Photos/1 John J Kauflin/1987-to-1993/1989/1989-10 007.jpg: Temporary hidden file /Photos/1 John J Kauflin/1987-to-1993/1989/.in.1989-10 007.jpg. already exists
-                        if (ex.Message.Contains("No such file or directory") || ex.Message.Contains("Temporary hidden file"))
+                        if (ex.Message.Contains("Error while uploading the file to the server") || ex.Message.Contains("No such file or directory") || ex.Message.Contains("Temporary hidden file"))
                         {
                             // If it is a recoverable error, Disconnect, wait a few seconds, Re-connect and continue to the top of the loop to process the same file
                             log("*** Error - reconnecting...");
@@ -223,11 +346,7 @@ public class WebSocketController : ControllerBase
                         }
 
                         // If unknown error, log and throw to exit
-                        log($"FTP Error: {ex.Message}");
-                        if (ex.InnerException != null)
-                        {
-                            log($"    InnerException = {ex.InnerException.Message}");
-                        }
+                        log($"FTP Error: {exMessage}");
                         throw;
                     }
 
@@ -314,45 +433,23 @@ public class WebSocketController : ControllerBase
         }
     }
 
-    private string GetConfigParamValue(string configParamName)
+
+    // Load all the keys and values from the database Config table into a static Dictionary
+    private static void LoadConfigParam()
     {
-        string strData = "";
-
-        try
+        using (var conn = new MySqlConnection(dbConnStr))
         {
-            if (string.IsNullOrEmpty(configParamName))
+            conn.Open();
+            var mgr = new MediaGalleryRepository(conn);
+            var configParamList = mgr.getConfigParam();
+            configParamDict.Clear();
+            foreach (var configParam in configParamList)
             {
-                return string.Empty;
+                configParamDict.Add(configParam.ConfigName, configParam.ConfigValue);
             }
-
-            using (var conn = new MySqlConnection(dbConnStr))
-            {
-                conn.Open();
-
-                using var command = new MySqlCommand("SELECT ConfigValue FROM ConfigParam WHERE ConfigName = @ConfigName", conn);
-                command.Parameters.AddWithValue("@ConfigName", configParamName);
-                using var reader = command.ExecuteReader();
-                while (reader.Read())
-                {
-                    strData = reader.GetString(0);
-                }
-
-                conn.Close();
-            }
-            return strData;
-        }
-        catch (MySqlException ex)
-        {
-            log(ex.Message);
-            return string.Empty;
-        }
-        catch (Exception ex)
-        {
-            log(ex.Message);
-            return string.Empty;
         }
     }
-
+    
     private void UpdConfigParamValue(string configName, string configValue)
     {
         try
@@ -365,15 +462,8 @@ public class WebSocketController : ControllerBase
             using (var conn = new MySqlConnection(dbConnStr))
             {
                 conn.Open();
-                using (var cmd = new MySqlCommand())
-                {
-                    cmd.Connection = conn;
-                    cmd.CommandText = "UPDATE ConfigParam SET ConfigValue = @ConfigValue WHERE ConfigName = @ConfigName;  ";
-                    cmd.Parameters.AddWithValue("ConfigValue", configValue);
-                    cmd.Parameters.AddWithValue("ConfigName", configName);
-                    cmd.ExecuteNonQuery();
-                }
-                conn.Close();
+                var mgr = new MediaGalleryRepository(conn);
+                mgr.UpdateConfigParamValue(configName, configValue);    
             }
             return;
         }

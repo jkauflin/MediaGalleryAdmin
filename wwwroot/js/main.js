@@ -26,11 +26,16 @@ var main = (function () {
     //=================================================================================================================
     // Bind events
     //document.getElementById("ClearLogButton").addEventListener("click", _clearLog);
-    document.getElementById("UpdateButton").addEventListener("click", _update);
+    document.getElementById("UpdFileInfoButton").addEventListener("click", _updFileInfo);
     document.getElementById("FileTransferButton").addEventListener("click", _fileTransfer);
 
     //=================================================================================================================
     // Module methods
+    function _updFileInfo(event) {
+        document.getElementById("LogMessageDisplay").innerHTML = "Starting File Info update"
+        _executeServerTask("UpdateFileInfo")
+    }
+
     function _fileTransfer(event) {
         document.getElementById("LogMessageDisplay").innerHTML = "Starting File Transfer"
         _executeServerTask("FileTransfer")
