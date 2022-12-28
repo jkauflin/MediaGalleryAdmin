@@ -58,6 +58,7 @@ using MySqlConnector;
 using static System.Net.WebRequestMethods;
 using MediaGalleryAdmin.Model;
 using System.Reflection.PortableExecutable;
+using System.Linq;
 
 namespace MediaGalleryAdmin.Controllers;
 
@@ -92,6 +93,7 @@ public class WebSocketController : ControllerBase
             webSocket = await HttpContext.WebSockets.AcceptWebSocketAsync();
             dbConnStr = _configuration["dbConnStr"];
             LoadConfigParam();
+            log($"Loaded ConfigParam dictionary, Count = {configParamDict.Count}");
 
             if (taskName.Equals("FileTransfer"))
             {
@@ -249,114 +251,116 @@ public class WebSocketController : ControllerBase
             string remotePhotosRoot = configParamDict["REMOTE_PHOTOS_ROOT"];
             string photosStartDir = configParamDict["PHOTOS_START_DIR"];
 
-            /* This doesn' seem to work - had to use full URL in call
-            httpClient = new()
+            int maxRows = 100;
+            int index = 0;
+            int index2 = 0;
+            var mgr = new MediaGalleryRepository(null);
+            List<FileInfoTable> fileInfoTableList;
+            FileInfoTable fiRec;
+            bool done = false;
+            bool done2 = false;
+            string createThumbnailUrl;
+            while (!done)
             {
-                BaseAddress = new Uri(GetConfigParamValue("WEB_ROOT_URL"))
-            };
-            */
-
-            lastRunDate = DateTime.Parse(configParamDict["LastRunDate"]);
-            // For TESTING
-            //lastRunDate = DateTime.Parse("01/01/2000");
-            log($"Last Run = {lastRunDate.ToString("MM/dd/yyyy HH:mm:ss")}");
-            var startDateTime = DateTime.Now.ToString("MM/dd/yyyy HH:mm:ss");
-
-            var root = new DirectoryInfo(localPhotosRoot + photosStartDir);
-            fileList.Clear();
-            // Start the recursive function (which will only complete when all subsequent recursive calls are done)
-            WalkDirectoryTree(root);
-
-            if (fileList.Count == 0)
-            {
-                log("No new files found");
-                return;
-            }
-
-            //bool fileExists;
-            //bool fileModified = false;
-            //bool dirExists;
-            //DateTime remoteFileModifiedDateTime;
-            using (var ftpConn = new FtpClient(ftpHost, ftpUser, ftpPass))
-            {
-                ftpConn.Config.EncryptionMode = FtpEncryptionMode.Explicit;
-                ftpConn.Config.ValidateAnyCertificate = true;
-                // For debugging
-                //ftpConn.Config.LogToConsole = true;
-                ftpConn.Connect();
-
-                if (!ftpConn.DirectoryExists(remotePhotosRoot))
+                using (var conn = new MySqlConnection(dbConnStr))
                 {
-                    log($"Remote FTP directory ROOT does not exist, dir = {remotePhotosRoot}");
-                    return;
+                    conn.Open();
+                    mgr.setConnection(conn);
+                    fileInfoTableList = mgr.getFileInfoTableList(maxRows);
+                    if (fileInfoTableList == null)
+                    {
+                        done = true;
+                        continue;
+                    }
                 }
 
-                ftpConn.SetWorkingDirectory(remotePhotosRoot);
-                string fileNameAndPath;
-                //string dirPath;
-                string createThumbnailUrl;
-                int index = 0;
-                FileInfo fi;
-                //foreach (FileInfo fi in fileList)
-                while (index < fileList.Count)
+                log($"***** fileInfoTableList.Count = {fileInfoTableList.Count}");
+                Thread.Sleep(8000);
+
+                using (var ftpConn = new FtpClient(ftpHost, ftpUser, ftpPass))
                 {
-                    fi = (FileInfo)fileList[index];
-                    fileNameAndPath = fi.FullName.Substring(localPhotosRoot.Length).Replace(@"\", @"/");
-                    /*
-                    dirPath = "";
-                    if (!String.IsNullOrEmpty(fi.DirectoryName))
-                    {
-                        dirPath = fi.DirectoryName.Substring(localPhotosRoot.Length);
-                    }
-                    */
-                    log($"{index + 1} of {fileList.Count}, {fileNameAndPath}");
+                    ftpConn.Config.EncryptionMode = FtpEncryptionMode.Explicit;
+                    ftpConn.Config.ValidateAnyCertificate = true;
+                    // For debugging
+                    //ftpConn.Config.LogToConsole = true;
+                    ftpConn.Connect();
 
-                    try
+                    if (!ftpConn.DirectoryExists(remotePhotosRoot))
                     {
-                        // Try the FTP upload, overwriting existing files, and "true" to create directories if they do not exist
-                        // Not checking modified dates on the FTP file because we count on the local to show which are changed and don't want to make an extra FTP call
-                        ftpConn.Config.RetryAttempts = 3;
-                        ftpConn.UploadFile(fi.FullName, fileNameAndPath, FtpRemoteExists.Overwrite, true, FtpVerify.Retry);
-
-                        // Make an HTTPS GET call to create the thumbnail and smaller files
-                        createThumbnailUrl = webRoolUrl + "/vendor/jkauflin/jjkgallery/createThumbnail.php?filePath=" + fileNameAndPath;
-                        GetAsync(createThumbnailUrl).Wait();
-                        // Increment to the next file if all operations were successful
-                        index++;
+                        log($"Remote FTP directory ROOT does not exist, dir = {remotePhotosRoot}");
+                        done = true;
+                        continue;
                     }
-                    catch (Exception ex)
+
+                    ftpConn.SetWorkingDirectory(remotePhotosRoot);
+                    done2 = false;
+                    index2 = 0;
+                    while (index2 < fileInfoTableList.Count && !done2)
+                    //foreach (var fiRec in fileInfoTableList)
                     {
-                        _log.LogError(ex, "Error in file processing");
-                        string exMessage = ex.Message;
-                        if (ex.InnerException != null)
+                        fiRec = (FileInfoTable)fileInfoTableList[index2];
+                        log($"{index + 1}, {index2 + 1}, {fiRec.NameAndPath}");
+
+                        try
                         {
-                            exMessage = exMessage + " " + ex.InnerException.Message;
+                            // Try the FTP upload, overwriting existing files, and "true" to create directories if they do not exist
+                            // Not checking modified dates on the FTP file because we count on the local to show which are changed and don't want to make an extra FTP call
+                            ftpConn.Config.RetryAttempts = 3;
+                            ftpConn.UploadFile(fiRec.FullNameLocal, fiRec.NameAndPath, FtpRemoteExists.Overwrite, true, FtpVerify.Retry);
+
+                            // Make an HTTPS GET call to create the thumbnail and smaller files
+                            createThumbnailUrl = webRoolUrl + "/vendor/jkauflin/jjkgallery/createThumbnail.php?filePath=" + fiRec.NameAndPath;
+                            GetAsync(createThumbnailUrl).Wait();
+
+                            // Update the flag in the db for the file (to indicate processing is done)
+                            using (var conn = new MySqlConnection(dbConnStr))
+                            {
+                                conn.Open();
+                                mgr.setConnection(conn);
+                                mgr.updFileInfoToBeProcessed(fiRec.Name, false);
+                            }
+
+                            // Increment to the next file if all operations were successful
+                            index2++;
+                            index++;
                         }
-
-                        //InnerException = Code: 550 Message: Photos/1 John J Kauflin/1987-to-1993/1989/1989-10 007.jpg: Temporary hidden file /Photos/1 John J Kauflin/1987-to-1993/1989/.in.1989-10 007.jpg. already exists
-                        if (ex.Message.Contains("Error while uploading the file to the server") || ex.Message.Contains("No such file or directory") || ex.Message.Contains("Temporary hidden file"))
+                        catch (Exception ex)
                         {
+                            _log.LogError(ex, "Error in file processing");
+                            string exMessage = ex.Message;
+                            if (ex.InnerException != null)
+                            {
+                                exMessage = exMessage + " " + ex.InnerException.Message;
+                            }
+
                             // If it is a recoverable error, Disconnect, wait a few seconds, Re-connect and continue to the top of the loop to process the same file
-                            log("*** Error - reconnecting...");
-                            ftpConn.Disconnect();
-                            Thread.Sleep(3000);
-                            ftpConn.Connect();
-                            ftpConn.SetWorkingDirectory(remotePhotosRoot);
-                            continue;
-                        }
+                            if (exMessage.Contains("Error while uploading the file to the server") || exMessage.Contains("No such file or directory") || exMessage.Contains("Temporary hidden file")
+                                || exMessage.Contains("SSL connection could not be established") || exMessage.Contains("Unable to build data connection") )
+                            {
+                                if (exMessage.Contains("No such file or directory"))
+                                {
+                                    int pos = fiRec.NameAndPath.LastIndexOf(@"/");
+                                    string dirPath = fiRec.NameAndPath.Substring(0,pos);
+                                    log($">>> Create Dir = {dirPath}");
+                                    ftpConn.CreateDirectory(dirPath, true);
+                                }
 
-                        // If unknown error, log and throw to exit
-                        log($"FTP Error: {exMessage}");
-                        throw;
+                                // Disconnect the FTP, drop out of the inner loop and let it start again
+                                ftpConn.Disconnect();
+                                done2 = true;
+                                continue;
+                            }
+
+                            // If unknown error, log and throw to exit
+                            log($"FTP Error: {exMessage}");
+                            throw;
+                        }
                     }
 
-                } // Loop through the file list
+                } // using (var ftpConn = new FtpClient(ftpHost, ftpUser, ftpPass))
 
-                ftpConn.Disconnect();
-            } // using (var ftpConn = new FtpClient(ftpHost, ftpUser, ftpPass))
+            } // Loop through the file list
 
-            // Update LastRunDate with the startDateTime from this run
-            UpdConfigParamValue("LastRunDate", startDateTime);
 
             timer.Stop();
             log($"END of FileTransfer, elapsed time = {timer.Elapsed.ToString()}");

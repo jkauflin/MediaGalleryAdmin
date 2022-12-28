@@ -55,6 +55,23 @@ namespace MediaGalleryAdmin.Model
             }
         }
 
+        public bool updFileInfoToBeProcessed(string Name, bool ToBeProcessed)
+        {
+            bool updSuccess = true;
+            var fiRec = conn.Get<FileInfoTable>(Name);
+            if (fiRec != null)
+            {
+                fiRec.ToBeProcessed = 0;
+                if (ToBeProcessed)
+                {
+                    fiRec.ToBeProcessed = 1;
+                }
+                updSuccess = conn.Update(fiRec);
+            }
+
+            return updSuccess;
+        }
+
         public FileInfoTable getFileInfoTable(string Name)
         {
             /*
@@ -75,6 +92,14 @@ namespace MediaGalleryAdmin.Model
             return conn.Insert(fiRec);
         }
 
+
+        public List<FileInfoTable> getFileInfoTableList(int maxRows = 100)
+        {
+            string sql = String.Format($"SELECT * FROM FileInfo WHERE ToBeProcessed > 0 LIMIT {maxRows}; ");
+            //Console.WriteLine("${DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}, sql = {sql}");
+
+            return conn.Query<FileInfoTable>(sql).AsList();
+        }
 
     } // public class MediaGalleryRepository
 } // namespace MediaGalleryAdmin.Model
