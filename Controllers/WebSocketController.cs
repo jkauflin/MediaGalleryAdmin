@@ -40,6 +40,7 @@
  * 2022-12-23 JJK   Working on update file info (to new DB table)
  * 2022-12-24 JJK   Implemented a Dictionary to hold config keys and values
  * 2022-12-27 JJK   Implemented micro-ORM to do database work (see Model)
+ * 2022-12-29 JJK   Implemented final max retry checks
  *============================================================================*/
 using System;
 using System.Collections;
@@ -143,9 +144,9 @@ public class WebSocketController : ControllerBase
             string localPhotosRoot = configParamDict["LOCAL_PHOTOS_ROOT"];
             string photosStartDir = configParamDict["PHOTOS_START_DIR"];
 
-            //lastRunDate = DateTime.Parse(configParamDict["LastRunDate"]);
+            lastRunDate = DateTime.Parse(configParamDict["LastRunDate"]);
             // For TESTING
-            lastRunDate = DateTime.Parse("01/01/2000");
+            //lastRunDate = DateTime.Parse("01/01/0001");
             log($"Last Run = {lastRunDate.ToString("MM/dd/yyyy HH:mm:ss")}");
             var startDateTime = DateTime.Now.ToString("MM/dd/yyyy HH:mm:ss");
 
@@ -225,7 +226,6 @@ public class WebSocketController : ControllerBase
                 // Increment to the next file if all operations were successful
                 index++;
             } // Loop through the file list
-
 
             // Update LastRunDate with the startDateTime from this run
             UpdConfigParamValue("LastRunDate", startDateTime);
