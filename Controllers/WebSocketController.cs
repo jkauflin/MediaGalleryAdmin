@@ -59,6 +59,9 @@ using static System.Net.WebRequestMethods;
 using MediaGalleryAdmin.Model;
 using System.Reflection.PortableExecutable;
 using System.Linq;
+using Microsoft.Extensions.Hosting;
+using System.Diagnostics.Metrics;
+using System.Security.Cryptography;
 
 namespace MediaGalleryAdmin.Controllers;
 
@@ -93,7 +96,11 @@ public class WebSocketController : ControllerBase
             webSocket = await HttpContext.WebSockets.AcceptWebSocketAsync();
             dbConnStr = _configuration["dbConnStr"];
             LoadConfigParam();
-            log($"Loaded ConfigParam dictionary, Count = {configParamDict.Count}");
+            if (configParamDict.Count == 0)
+            {
+                log("*** Problem loading configuration parameters - check logs and database");
+                return;
+            }
 
             if (taskName.Equals("FileTransfer"))
             {
@@ -242,11 +249,11 @@ public class WebSocketController : ControllerBase
             log($"Beginning of FileTransfer");
             timer.Start();
 
-            // re-write to get these all in the same transaction (maybe load into a dictionary)
+            // Get config values from the static dictionary
             string ftpHost = configParamDict["FTP_HOST"];
             string ftpUser = configParamDict["FTP_USER"];
             string ftpPass = configParamDict["FTP_PASS"];
-            string webRoolUrl = configParamDict["WEB_ROOT_URL"];
+            string webRootUrl = configParamDict["WEB_ROOT_URL"];
             string localPhotosRoot = configParamDict["LOCAL_PHOTOS_ROOT"];
             string remotePhotosRoot = configParamDict["REMOTE_PHOTOS_ROOT"];
             string photosStartDir = configParamDict["PHOTOS_START_DIR"];
@@ -254,6 +261,9 @@ public class WebSocketController : ControllerBase
             int maxRows = 100;
             int index = 0;
             int index2 = 0;
+            int tempCnt = 0;
+            int retryCnt = 0;
+            int maxRetry = 3;
             var mgr = new MediaGalleryRepository(null);
             List<FileInfoTable> fileInfoTableList;
             FileInfoTable fiRec;
@@ -262,6 +272,18 @@ public class WebSocketController : ControllerBase
             string createThumbnailUrl;
             while (!done)
             {
+                retryCnt++;
+                if (retryCnt > maxRetry & tempCnt == 0)
+                {
+                    // If no records have been processed in the last X number of re-tries, exit out
+                    done = true;
+                    log("*** Max re-tries exceeded with no records processed - exiting");
+                    continue;
+                }
+
+                tempCnt = 0;
+
+                // Get a set of files to process from the database
                 using (var conn = new MySqlConnection(dbConnStr))
                 {
                     conn.Open();
@@ -269,14 +291,19 @@ public class WebSocketController : ControllerBase
                     fileInfoTableList = mgr.getFileInfoTableList(maxRows);
                     if (fileInfoTableList == null)
                     {
+                        log("No files to be processed");
+                        done = true;
+                        continue;
+                    }
+                    if (fileInfoTableList.Count == 0)
+                    {
+                        log("No files to be processed");
                         done = true;
                         continue;
                     }
                 }
 
-                log($"***** fileInfoTableList.Count = {fileInfoTableList.Count}");
-                Thread.Sleep(8000);
-
+                // Open an FTP connection for the file transfer
                 using (var ftpConn = new FtpClient(ftpHost, ftpUser, ftpPass))
                 {
                     ftpConn.Config.EncryptionMode = FtpEncryptionMode.Explicit;
@@ -309,7 +336,7 @@ public class WebSocketController : ControllerBase
                             ftpConn.UploadFile(fiRec.FullNameLocal, fiRec.NameAndPath, FtpRemoteExists.Overwrite, true, FtpVerify.Retry);
 
                             // Make an HTTPS GET call to create the thumbnail and smaller files
-                            createThumbnailUrl = webRoolUrl + "/vendor/jkauflin/jjkgallery/createThumbnail.php?filePath=" + fiRec.NameAndPath;
+                            createThumbnailUrl = webRootUrl + "/vendor/jkauflin/jjkgallery/createThumbnail.php?filePath=" + fiRec.NameAndPath;
                             GetAsync(createThumbnailUrl).Wait();
 
                             // Update the flag in the db for the file (to indicate processing is done)
@@ -323,6 +350,7 @@ public class WebSocketController : ControllerBase
                             // Increment to the next file if all operations were successful
                             index2++;
                             index++;
+                            tempCnt++;
                         }
                         catch (Exception ex)
                         {
@@ -332,28 +360,22 @@ public class WebSocketController : ControllerBase
                             {
                                 exMessage = exMessage + " " + ex.InnerException.Message;
                             }
+                            log($">>> Error: {exMessage}");
 
-                            // If it is a recoverable error, Disconnect, wait a few seconds, Re-connect and continue to the top of the loop to process the same file
-                            if (exMessage.Contains("Error while uploading the file to the server") || exMessage.Contains("No such file or directory") || exMessage.Contains("Temporary hidden file")
-                                || exMessage.Contains("SSL connection could not be established") || exMessage.Contains("Unable to build data connection") )
+                            if (exMessage.Contains("No such file or directory"))
                             {
-                                if (exMessage.Contains("No such file or directory"))
-                                {
-                                    int pos = fiRec.NameAndPath.LastIndexOf(@"/");
-                                    string dirPath = fiRec.NameAndPath.Substring(0,pos);
-                                    log($">>> Create Dir = {dirPath}");
-                                    ftpConn.CreateDirectory(dirPath, true);
-                                }
-
-                                // Disconnect the FTP, drop out of the inner loop and let it start again
-                                ftpConn.Disconnect();
-                                done2 = true;
-                                continue;
+                                int pos = fiRec.NameAndPath.LastIndexOf(@"/");
+                                string dirPath = fiRec.NameAndPath.Substring(0, pos);
+                                log($">>> Create missing Dir = {dirPath}");
+                                ftpConn.CreateDirectory(dirPath, true);
                             }
 
-                            // If unknown error, log and throw to exit
-                            log($"FTP Error: {exMessage}");
-                            throw;
+                            // Disconnect the FTP, drop out of the inner loop and let it start again
+                            ftpConn.Disconnect();
+                            done2 = true;
+                            // Wait for X seconds to give connection issues a chance to resolve
+                            Thread.Sleep(8000);
+                            continue;
                         }
                     }
 
