@@ -41,6 +41,9 @@
  * 2022-12-24 JJK   Implemented a Dictionary to hold config keys and values
  * 2022-12-27 JJK   Implemented micro-ORM to do database work (see Model)
  * 2022-12-29 JJK   Implemented final max retry checks
+ * 2023-01-01 JJK   Implemented MetadataExtractor to data from photos, and
+ *                  a special binary read to get the Picasa face people string
+ * 2023-01-06 JJK   Implemented RegEx pattern to get DateTime from filename
  *============================================================================*/
 using System;
 using System.Collections;
@@ -63,6 +66,13 @@ using System.Linq;
 using Microsoft.Extensions.Hosting;
 using System.Diagnostics.Metrics;
 using System.Security.Cryptography;
+using MetadataExtractor;
+using Directory = MetadataExtractor.Directory;
+using System.ComponentModel.DataAnnotations;
+using MetadataExtractor.Formats.Exif;
+using Microsoft.VisualBasic;
+using System.Text.RegularExpressions;
+using Microsoft.Extensions.FileSystemGlobbing;
 
 namespace MediaGalleryAdmin.Controllers;
 
@@ -80,12 +90,77 @@ public class WebSocketController : ControllerBase
     private static HttpClient httpClient = new HttpClient();
 
     private static Dictionary<string, string> configParamDict = new Dictionary<string, string>();
+    private static List<DatePattern> dpList = new List<DatePattern>();
 
     public WebSocketController (IConfiguration configuration, ILogger<WebSocketController> logger)
     {
         _configuration = configuration;
         _log = logger;
         _log.LogDebug(1, "NLog injected into Controller");
+
+        // Load the patterns to use for RegEx and DateTime Parse
+        DatePattern datePattern;
+
+        datePattern = new DatePattern();
+        datePattern.regex = new Regex(@"(19|20)\d{2}-((0[1-9])|(1[012]))_(19|20)\d{2}((0[1-9])|(1[012]))((0[1-9]|[12]\d)|3[01])");
+        datePattern.dateParseFormat = "yyyy-MM_yyyyMMdd";
+        dpList.Add(datePattern);
+
+        datePattern = new DatePattern();
+        datePattern.regex = new Regex(@"IMG_(19|20)\d{2}((0[1-9])|(1[012]))((0[1-9]|[12]\d)|3[01])");
+        datePattern.dateParseFormat = "IMG_yyyyMMdd";
+        dpList.Add(datePattern);
+
+        datePattern = new DatePattern();
+        datePattern.regex = new Regex(@"(19|20)\d{2}((0[1-9])|(1[012]))((0[1-9]|[12]\d)|3[01])_\d{9}_iOS");
+        datePattern.dateParseFormat = "yyyyMMdd_iOS";
+        dpList.Add(datePattern);
+
+        datePattern = new DatePattern();
+        datePattern.regex = new Regex(@"(19|20)\d{2}((0[1-9])|(1[012]))((0[1-9]|[12]\d)|3[01])");
+        datePattern.dateParseFormat = "yyyyMMdd";
+        dpList.Add(datePattern);
+        // \d{4} to (19|20)\d{2}
+
+
+        //+		fi	{D:\Photos\1 John J Kauflin\2016-to-2022\2018\01 Winter\FB_IMG_1520381172965.jpg}	System.IO.FileInfo
+
+
+
+        datePattern = new DatePattern();
+        datePattern.regex = new Regex(@"(19|20)\d{2}-((0[1-9])|(1[012]))-((0[1-9]|[12]\d)|3[01])");
+        datePattern.dateParseFormat = "yyyy-MM-dd";
+        dpList.Add(datePattern);
+
+        datePattern = new DatePattern();
+        datePattern.regex = new Regex(@"(19|20)\d{2}_((0[1-9])|(1[012]))_((0[1-9]|[12]\d)|3[01])");
+        datePattern.dateParseFormat = "yyyy_MM_dd";
+        dpList.Add(datePattern);
+
+        datePattern = new DatePattern();
+        datePattern.regex = new Regex(@"(19|20)\d{2}-((0[1-9])|(1[012]))");
+        datePattern.dateParseFormat = "yyyy-MM";
+        dpList.Add(datePattern);
+
+        datePattern = new DatePattern();
+        datePattern.regex = new Regex(@"(19|20)\d{2}_((0[1-9])|(1[012]))");
+        datePattern.dateParseFormat = "yyyy_MM";
+        dpList.Add(datePattern);
+
+        datePattern = new DatePattern();
+        datePattern.regex = new Regex(@"(19|20)\d{2}((0[1-9])|(1[012]))");
+        datePattern.dateParseFormat = "yyyyMM";
+        dpList.Add(datePattern);
+
+        datePattern = new DatePattern();
+        datePattern.regex = new Regex(@"\\(19|20)\d{2}(\-|\ )");
+        datePattern.dateParseFormat = "yyyy";
+        dpList.Add(datePattern);
+
+        datePattern = new DatePattern();
+        datePattern.regex = new Regex(@"(\(|\\)(19|20)\d{2}(\)|\\)");
+        datePattern.dateParseFormat = "yyyy";
+        dpList.Add(datePattern);
     }
 
     [HttpGet("/ws")]
@@ -132,6 +207,180 @@ public class WebSocketController : ControllerBase
         }
     }
 
+    private string getTagContent(FileInfo fi, string tagStartStr, string tagEndStr)
+    {
+        string contentStr = "";
+
+        byte[] fileContent = null;
+        System.IO.FileStream fs = new System.IO.FileStream(fi.FullName, System.IO.FileMode.Open, System.IO.FileAccess.Read);
+        System.IO.BinaryReader binaryReader = new System.IO.BinaryReader(fs);
+        long byteLength = fi.Length;
+        fileContent = binaryReader.ReadBytes((Int32)byteLength);
+        fs.Close();
+        fs.Dispose();
+        binaryReader.Close();
+
+        StringBuilder tempStr = new StringBuilder();
+        char[] matchChars = tagStartStr.ToCharArray();
+        bool matchStarted = false;
+        int numCharsMatched = 0;
+        bool tagFound = false;
+        int maxContentStrLength = 1000;
+
+        Int32 tempInt;
+        bool done = false;
+        for (int i = 0; i < byteLength && !done; i++)
+        {
+            tempInt = (Int32)fileContent[i];
+            if (tempInt < 32 && tempInt > 126)
+            {
+                continue;
+            }
+
+            if (!tagFound)
+            {
+                if ((char)tempInt == matchChars[numCharsMatched])
+                {
+                    matchStarted = true;
+                    numCharsMatched++;
+                }
+                else
+                {
+                    matchStarted = false;
+                    numCharsMatched = 0;
+                }
+
+                if (matchStarted && numCharsMatched == matchChars.Length)
+                {
+                    tagFound = true;
+                }
+            }
+            else
+            {
+                // Start collecting characters into a string, and check the string for end tag
+                tempStr.Append((char)tempInt);
+                if (tempStr.ToString().Contains(tagEndStr))
+                {
+                    int pos = tempStr.ToString().IndexOf(tagEndStr);
+                    contentStr = tempStr.ToString().Substring(0, pos);
+                    done = true;
+                } 
+                else
+                {
+                    if (tempStr.ToString().Length > maxContentStrLength)
+                    {
+                        contentStr = tempStr.ToString().Substring(0, 1000);
+                        done = true;
+                    }
+                }
+            }
+        }
+
+        //Console.Write($"contentStr = {contentStr}");
+        return contentStr;
+    }
+
+    private DateTime getDateFromFilename(string fileName)
+    {
+        DateTime outDateTime = new DateTime(9999, 1, 1);
+        string dateFormat;
+        string dateStr;
+
+        if (fileName.Contains("FB_IMG_"))
+        {
+            return outDateTime;
+        }
+
+        MatchCollection matches;
+        bool found = false;
+        int index = 0;
+        // Loop through the defined RegEx patterns for date, find matches in the filename, and parse to get DateTime
+        while (index < dpList.Count && !found)
+        {
+            matches = dpList[index].regex.Matches(fileName);
+            if (matches.Count > 0)
+            {
+                found = true;
+                // If there are multiple matches, just take the last one
+                dateStr = matches[matches.Count-1].Value;
+                dateFormat = dpList[index].dateParseFormat;
+
+                // For this combined case, get the year-month from the start
+                if (dateFormat.Equals("yyyy-MM_yyyyMMdd"))
+                {
+                    dateStr = dateStr.Substring(0, 7);
+                    dateFormat = "yyyy-MM";
+                }
+
+                if (dateFormat.Equals("yyyyMMdd_iOS"))
+                {
+                    dateStr = dateStr.Substring(0, 8);
+                    dateFormat = "yyyyMMdd";
+                }
+
+                if (dateFormat.Equals("IMG_yyyyMMdd"))
+                {
+                    dateStr = dateStr.Substring(4, 8);
+                    dateFormat = "yyyyMMdd";
+                }
+
+                if (dateFormat.Equals("yyyy"))
+                {
+                    // Strip off the beginning and ending characters ("\" or "(") form the year match
+                    dateStr = dateStr.Substring(1, 4);
+
+                    // Check for a season tag and add a month to the year
+                    if (fileName.Contains(" Winter"))
+                    {
+                        dateFormat = "yyyy-MM";
+                        if (fileName.Contains("01 Winter")) {
+                            dateStr = dateStr + "-01";
+                        }
+                        else
+                        {
+                            dateStr = dateStr + "-11";
+                        }
+                    }
+                    else if (fileName.Contains(" Spring"))
+                    {
+                        dateFormat = "yyyy-MM";
+                        dateStr = dateStr + "-04";
+                    }
+                    else if (fileName.Contains(" Summer"))
+                    {
+                        dateFormat = "yyyy-MM";
+                        dateStr = dateStr + "-07";
+                    }
+                    else if (fileName.Contains(" Fall"))
+                    {
+                        dateFormat = "yyyy-MM";
+                        dateStr = dateStr + "-09";
+                    }
+                }
+
+                // D:\Photos\1 John J Kauflin\2009-to-2015\2013\04 Fall\Maria 459.jpg, date: \2013\, format: yyyy, *** PARSE FAILED *** 
+                // *** check the EXIF info on this one ??????????????
+
+                // >>>>> when querying a set of photos - make sure to include Filename as SORT ORDER
+                // >>>>> something to search for duplicates?  (get rid of John 50th)
+
+                // handling people names in the filename (just make sure included on search?  try to get into people string?
+
+                if (DateTime.TryParseExact(dateStr, dateFormat, null, System.Globalization.DateTimeStyles.None, out outDateTime))
+                {
+                    //log($"{fileName}, date: {dateStr}, format: {dateFormat}, DateTime: {outDateTime}");
+                }
+                else
+                {
+                    log($"{fileName}, date: {dateStr}, format: {dateFormat}, *** PARSE FAILED ***");
+                }
+            }
+
+            index++;
+        }
+
+        return outDateTime;
+    }
 
     private void UpdateFileInfo()
     {
@@ -146,7 +395,7 @@ public class WebSocketController : ControllerBase
 
             lastRunDate = DateTime.Parse(configParamDict["LastRunDate"]);
             // For TESTING
-            //lastRunDate = DateTime.Parse("01/01/0001");
+            lastRunDate = DateTime.Parse("01/01/0001");
             log($"Last Run = {lastRunDate.ToString("MM/dd/yyyy HH:mm:ss")}");
             var startDateTime = DateTime.Now.ToString("MM/dd/yyyy HH:mm:ss");
 
@@ -169,19 +418,77 @@ public class WebSocketController : ControllerBase
             string tempStr;
             string category;
             DateTime taken;
+            string peopleStr;
             var mgr = new MediaGalleryRepository(null);
+            DateTime nullDate = new DateTime(0001, 1, 1);
+            DateTime maxDateTime = new DateTime(9999, 1, 1);
+            IEnumerable<Directory> directories;
+            Directory subIfdDirectory;
+            DateTime exifDateTime;
+            string exifDateTimeFormat = "yyyy:MM:dd HH:mm:ss";
+            string tStr;
+
             while (index < fileList.Count)
             {
                 fi = (FileInfo)fileList[index];
-                log($"{index + 1} of {fileList.Count}, {fi.FullName}");
+                _log.LogInformation($"{index + 1} of {fileList.Count}, {fi.FullName}");
+
+                // Skip files in this directory
+                if (fi.FullName.Contains(".picasaoriginals"))
+                {
+                    index++;
+                    continue;
+                }
 
                 fileNameAndPath = fi.FullName.Substring(localPhotosRoot.Length).Replace(@"\", @"/");
                 pos = fileNameAndPath.IndexOf(@"/");
                 tempStr = fileNameAndPath.Substring(pos+1);
                 pos = tempStr.IndexOf(@"/");
                 category = tempStr.Substring(0,pos);
-                taken = DateTime.Now;
-                
+
+                // Get the photo date taken from the file name
+                taken = getDateFromFilename(fi.FullName);
+
+                //-----------------------------------------------------------------------------------------------------------------
+                // Get the metadata from the photo files
+                //-----------------------------------------------------------------------------------------------------------------
+                directories = ImageMetadataReader.ReadMetadata(fi.FullName);
+                if (directories != null)
+                {
+                    subIfdDirectory = directories.OfType<ExifSubIfdDirectory>().FirstOrDefault();
+                    if (subIfdDirectory != null)
+                    {
+                        //var tStr = subIfdDirectory?.GetDescription(ExifDirectoryBase.TagDateTime);
+                        tStr = subIfdDirectory?.GetDescription(ExifDirectoryBase.TagDateTimeOriginal);
+                        if (!String.IsNullOrEmpty(tStr))
+                        {
+                            if (DateTime.TryParseExact(tStr, exifDateTimeFormat, null, System.Globalization.DateTimeStyles.None, out exifDateTime))
+                            {
+                                //Console.WriteLine($"{dateTimeStr}, tempStr = {tempStr}, dateFormat = {dateFormat}, outDateTime = {outDateTime}");
+                                if (exifDateTime.CompareTo(taken) < 0)
+                                {
+                                    taken = exifDateTime;
+                                }
+                            }
+                            // 2016:11:27 22:25:26
+                            // 2000:09:06 14:46:32
+                        }
+                    }
+                }
+
+                // If taken is not set, just use the file create date
+                if (taken.CompareTo(fi.CreationTime) > 0)
+                {
+                    taken = fi.CreationTime;
+                }
+
+                // Get the Picasa people face tags between specific hard-coded RDF mwg-rs tags
+                peopleStr = getTagContent(fi, @"mwg-rs:Name=""", @""" mwg-rs:Type=""Face""");
+                //log($"people = {peopleStr}");
+
+                // *** need to check for DUPLICATES and how to handle the same image under different categories
+                // *** and how to build the menu structure from DB file info rather than the physical directories
+
                 using (var conn = new MySqlConnection(dbConnStr))
                 {
                     conn.Open();
@@ -195,10 +502,10 @@ public class WebSocketController : ControllerBase
                         fiRec.NameAndPath = fileNameAndPath;
                         fiRec.CreateDateTime = fi.CreationTime;
                         fiRec.LastModified = fi.LastWriteTime;
-                        //fiRec.TakenDateTime = taken;
+                        fiRec.TakenDateTime = taken;
                         //fiRec.Title = "Title";
                         //fiRec.Description = "Description";
-                        //fiRec.People = "People";
+                        fiRec.People = peopleStr;
                         fiRec.ToBeProcessed = 1;
                         mgr.updateFileInfoTable(fiRec);
                     }
@@ -215,14 +522,21 @@ public class WebSocketController : ControllerBase
                         fiRec.TakenDateTime = taken;
                         fiRec.Title = "Title";
                         fiRec.Description = "Description";
-                        fiRec.People = "People";
+                        fiRec.People = peopleStr;
                         fiRec.ToBeProcessed = 1;
-                        mgr.insertFileInfoTable(fiRec);
+                        try
+                        {
+                            mgr.insertFileInfoTable(fiRec);
+                        }
+                        catch (Exception ex)
+                        {
+                            log($"{index + 1} of {fileList.Count}, {fi.FullName}  *** Exception on INSERT *** ");
+                        }
                     }
                     
                     conn.Close();
                 }
-                
+
                 // Increment to the next file if all operations were successful
                 index++;
             } // Loop through the file list

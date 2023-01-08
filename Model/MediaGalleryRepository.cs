@@ -10,7 +10,7 @@ DESCRIPTION:  Class to handle interactions with the database repository
     logic and the "Dapper" work so calling apps don't have to include that
 
 -------------------------------------------------------------------------------
- 2022-12-27 JJK   Initial version
+2022-12-27 JJK   Initial version
 ===============================================================================*/
 
 using MySqlConnector;
