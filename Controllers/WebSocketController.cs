@@ -44,6 +44,7 @@
  * 2023-01-01 JJK   Implemented MetadataExtractor to data from photos, and
  *                  a special binary read to get the Picasa face people string
  * 2023-01-06 JJK   Implemented RegEx pattern to get DateTime from filename
+ * 2023-01-11 JJK   Implemented ExifLibrary to get and set metadata values
  *============================================================================*/
 using System;
 using System.Collections;
@@ -61,18 +62,17 @@ using FluentFTP;
 using MySqlConnector;
 using static System.Net.WebRequestMethods;
 using MediaGalleryAdmin.Model;
+/*
 using System.Reflection.PortableExecutable;
 using System.Linq;
 using Microsoft.Extensions.Hosting;
 using System.Diagnostics.Metrics;
 using System.Security.Cryptography;
-using MetadataExtractor;
-using Directory = MetadataExtractor.Directory;
-using System.ComponentModel.DataAnnotations;
-using MetadataExtractor.Formats.Exif;
 using Microsoft.VisualBasic;
+*/
 using System.Text.RegularExpressions;
-using Microsoft.Extensions.FileSystemGlobbing;
+//using Microsoft.Extensions.FileSystemGlobbing;
+using ExifLibrary;
 
 namespace MediaGalleryAdmin.Controllers;
 
@@ -177,6 +177,8 @@ public class WebSocketController : ControllerBase
                 log("*** Problem loading configuration parameters - check logs and database");
                 return;
             }
+
+            // >>>>>>>>>>>>>>>>>>>> is there a way to implement a STOP ?????????????????????????????
 
             if (taskName.Equals("FileTransfer"))
             {
@@ -394,8 +396,11 @@ public class WebSocketController : ControllerBase
             string photosStartDir = configParamDict["PHOTOS_START_DIR"];
 
             lastRunDate = DateTime.Parse(configParamDict["LastRunDate"]);
+            
             // For TESTING
-            lastRunDate = DateTime.Parse("01/01/0001");
+            lastRunDate = DateTime.Parse("01/10/2023");
+            photosStartDir = "Photos/1 John J Kauflin/2023-to-2029/2023/01 Winter";
+
             log($"Last Run = {lastRunDate.ToString("MM/dd/yyyy HH:mm:ss")}");
             var startDateTime = DateTime.Now.ToString("MM/dd/yyyy HH:mm:ss");
 
@@ -422,16 +427,19 @@ public class WebSocketController : ControllerBase
             var mgr = new MediaGalleryRepository(null);
             DateTime nullDate = new DateTime(0001, 1, 1);
             DateTime maxDateTime = new DateTime(9999, 1, 1);
-            IEnumerable<Directory> directories;
-            Directory subIfdDirectory;
-            DateTime exifDateTime;
+
+            //IEnumerable<Directory> directories;
+            //Directory subIfdDirectory;
+
+            //DateTime exifDateTime;
             string exifDateTimeFormat = "yyyy:MM:dd HH:mm:ss";
             string tStr;
 
-            while (index < fileList.Count)
+            while (index < fileList.Count && index < 2)
             {
                 fi = (FileInfo)fileList[index];
-                _log.LogInformation($"{index + 1} of {fileList.Count}, {fi.FullName}");
+                //_log.LogInformation($"{index + 1} of {fileList.Count}, {fi.FullName}");
+                log($"{index + 1} of {fileList.Count}, {fi.FullName}");
 
                 // Skip files in this directory
                 if (fi.FullName.Contains(".picasaoriginals"))
@@ -452,13 +460,61 @@ public class WebSocketController : ControllerBase
                 //-----------------------------------------------------------------------------------------------------------------
                 // Get the metadata from the photo files
                 //-----------------------------------------------------------------------------------------------------------------
-                directories = ImageMetadataReader.ReadMetadata(fi.FullName);
-                if (directories != null)
-                {
-                    subIfdDirectory = directories.OfType<ExifSubIfdDirectory>().FirstOrDefault();
-                    if (subIfdDirectory != null)
-                    {
-                        //var tStr = subIfdDirectory?.GetDescription(ExifDirectoryBase.TagDateTime);
+                var file = ImageFile.FromFile(fi.FullName);
+                //foreach (var property in file.Properties)
+                //{
+                //    log($"  IFD:{property.IFD} Tag:{property.Tag} Name:{property.Name} Value:{property.Value} ");
+                //}
+
+                var exifArtist = file.Properties.Get<ExifAscii>(ExifTag.Artist);
+                var exifCameraOwnerName = file.Properties.Get<ExifAscii>(ExifTag.CameraOwnerName);
+                var exifCopyright = file.Properties.Get<ExifAscii>(ExifTag.Copyright);
+                var exifDocumentName = file.Properties.Get<ExifAscii>(ExifTag.DocumentName);
+                var exifImageDescription = file.Properties.Get<ExifAscii>(ExifTag.ImageDescription);
+                var exifDateTime = file.Properties.Get<ExifDateTime>(ExifTag.DateTime);
+                var exifDateTimeOriginal = file.Properties.Get<ExifDateTime>(ExifTag.DateTimeOriginal);
+
+                // "1 John J Kauflin" use "John J Kauflin"
+                // "5 Bands"
+                // if not "Misc" use John J Kauflin
+                file.Properties.Set(ExifTag.Artist, "new artist");
+                file.Properties.Set(ExifTag.CameraOwnerName, "new owner");  // people
+                file.Properties.Set(ExifTag.Copyright, "new copyright");
+                file.Properties.Set(ExifTag.DocumentName, "new doc name");  // title
+                file.Properties.Set(ExifTag.ImageDescription, "new image description");  // description
+
+                // note the explicit cast to ushort
+                //file.Properties.Set(ExifTag.ISOSpeedRatings, <ushort>200);
+                file.Save(fi.FullName);
+
+                /*
+1 of 10, D:\Photos\1 John J Kauflin\2023-to-2029\2023\01 Winter\20221229_215031020_iOS.jpg
+
+Artist              ExifAscii   string  (Authors)
+CameraOwnerName     ExifAscii   string
+Copyright	        ExifAscii	string	(Copyright)     © 2021 | Gavin Phillips     year name
+DocumentName	    ExifAscii	string
+ImageDescription    ExifAscii	string  (Title, Subject)
+
+BodySerialNumber	42033	0xA431	ExifAscii	string
+PageName	285	0x011D	ExifAscii	string
+RelatedSoundFile	40964	0xA004	ExifAscii	string
+
+DateTimeOriginal    (Date taken)        {2022.12.29 16:50:31}
+DateTime            (Date modified)     {2023.01.10 19:49:54}   Modified:  1/10/2023  7:49/54 PM
+
+
+    IFD:Zeroth Tag:DateTime Name:DateTime Value:1/10/2023 7:49:54 PM                       *** when Picasa exported to a new file (when I moved to Photos) ***
+    IFD:EXIF Tag:DateTimeOriginal Name:DateTimeOriginal Value:12/29/2022 4:50:31 PM        *** when the photo was taken on the camera ***
+    IFD:EXIF Tag:DateTimeDigitized Name:DateTimeDigitized Value:12/29/2022 4:50:31 PM 
+
+
+DateTime	306	0x0132	ExifDateTime	DateTime
+DateTimeDigitized	36868	0x9004	ExifDateTime	DateTime
+DateTimeOriginal	36867	0x9003	ExifDateTime	DateTime
+                */
+
+                /*
                         tStr = subIfdDirectory?.GetDescription(ExifDirectoryBase.TagDateTimeOriginal);
                         if (!String.IsNullOrEmpty(tStr))
                         {
@@ -470,25 +526,23 @@ public class WebSocketController : ControllerBase
                                     taken = exifDateTime;
                                 }
                             }
-                            // 2016:11:27 22:25:26
-                            // 2000:09:06 14:46:32
                         }
-                    }
-                }
 
                 // If taken is not set, just use the file create date
                 if (taken.CompareTo(fi.CreationTime) > 0)
                 {
                     taken = fi.CreationTime;
                 }
+                */
 
                 // Get the Picasa people face tags between specific hard-coded RDF mwg-rs tags
-                peopleStr = getTagContent(fi, @"mwg-rs:Name=""", @""" mwg-rs:Type=""Face""");
+                //peopleStr = getTagContent(fi, @"mwg-rs:Name=""", @""" mwg-rs:Type=""Face""");
                 //log($"people = {peopleStr}");
 
                 // *** need to check for DUPLICATES and how to handle the same image under different categories
                 // *** and how to build the menu structure from DB file info rather than the physical directories
 
+                /*
                 using (var conn = new MySqlConnection(dbConnStr))
                 {
                     conn.Open();
@@ -505,7 +559,7 @@ public class WebSocketController : ControllerBase
                         fiRec.TakenDateTime = taken;
                         //fiRec.Title = "Title";
                         //fiRec.Description = "Description";
-                        fiRec.People = peopleStr;
+                        //fiRec.People = peopleStr;
                         fiRec.ToBeProcessed = 1;
                         mgr.updateFileInfoTable(fiRec);
                     }
@@ -536,6 +590,7 @@ public class WebSocketController : ControllerBase
                     
                     conn.Close();
                 }
+                */
 
                 // Increment to the next file if all operations were successful
                 index++;
