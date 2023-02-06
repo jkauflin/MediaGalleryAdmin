@@ -45,34 +45,23 @@
  *                  a special binary read to get the Picasa face people string
  * 2023-01-06 JJK   Implemented RegEx pattern to get DateTime from filename
  * 2023-01-11 JJK   Implemented ExifLibrary to get and set metadata values
+ * 2023-01-20 JJK   Implemented MediaType and MediaCategory concepts
+ * 2023-02-05 JJK   Updated to Bootstrap v5.2 and newest nav and menu ideas
+ *                  Starting to work on new file edit processing
  *============================================================================*/
-using System;
 using System.Collections;
-using System.Data;
 using System.Diagnostics;
-using System.IO;
-using System.Net;
 using System.Net.WebSockets;
-using System.Reflection;
-using System.Reflection.Emit;
 using System.Text;
-using System.Web;
 using Microsoft.AspNetCore.Mvc;
 using FluentFTP;
 using MySqlConnector;
 using static System.Net.WebRequestMethods;
 using MediaGalleryAdmin.Model;
-/*
-using System.Reflection.PortableExecutable;
-using System.Linq;
-using Microsoft.Extensions.Hosting;
-using System.Diagnostics.Metrics;
-using System.Security.Cryptography;
-using Microsoft.VisualBasic;
-*/
 using System.Text.RegularExpressions;
 //using Microsoft.Extensions.FileSystemGlobbing;
-using ExifLibrary;
+using static System.Net.Mime.MediaTypeNames;
+using System;
 
 namespace MediaGalleryAdmin.Controllers;
 
@@ -121,11 +110,7 @@ public class WebSocketController : ControllerBase
         datePattern.dateParseFormat = "yyyyMMdd";
         dpList.Add(datePattern);
         // \d{4} to (19|20)\d{2}
-
-
         //+		fi	{D:\Photos\1 John J Kauflin\2016-to-2022\2018\01 Winter\FB_IMG_1520381172965.jpg}	System.IO.FileInfo
-
-
 
         datePattern = new DatePattern();
         datePattern.regex = new Regex(@"(19|20)\d{2}-((0[1-9])|(1[012]))-((0[1-9]|[12]\d)|3[01])");
@@ -161,7 +146,31 @@ public class WebSocketController : ControllerBase
         datePattern.regex = new Regex(@"(\(|\\)(19|20)\d{2}(\)|\\)");
         datePattern.dateParseFormat = "yyyy";
         dpList.Add(datePattern);
+
+        datePattern = new DatePattern();
+        datePattern.regex = new Regex(@"(19|20)\d{2} ");
+        datePattern.dateParseFormat = "yyyy ";
+        dpList.Add(datePattern);
+
+        datePattern = new DatePattern();
+        datePattern.regex = new Regex(@" (19|20)\d{2}");
+        datePattern.dateParseFormat = " yyyy";
+        dpList.Add(datePattern);
     }
+
+    /*
+    [HttpGet("people/all")]
+    public ActionResult<IEnumerable<Person>> GetAll()
+    {
+        return new[]
+        {
+            new Person { Name = "Ana" },
+            new Person { Name = "Felipe" },
+            new Person { Name = "Emillia" }
+        };
+    }
+    */
+
 
     [HttpGet("/ws")]
     public async Task Get(string taskName)
@@ -229,6 +238,25 @@ public class WebSocketController : ControllerBase
         bool tagFound = false;
         int maxContentStrLength = 1000;
 
+
+        /*
+        <?xpacket begin="ï»¿" id="W5M0MpCehiHzreSzNTczkc9d"?> <x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="XMP Core 5.1.2"> 
+        <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"> <rdf:Description rdf:about="" xmlns:xmp="http://ns.adobe.com/xap/1.0/" 
+        xmlns:MicrosoftPhoto="http://ns.microsoft.com/photo/1.0/" xmlns:xmpMM="http://ns.adobe.com/xap/1.0/mm/" 
+        xmlns:mwg-rs="http://www.metadataworkinggroup.com/schemas/regions/" xmlns:stDim="http://ns.adobe.com/xap/1.0/sType/Dimensions#" 
+        xmlns:stArea="http://ns.adobe.com/xmp/sType/Area#" xmp:CreateDate="2016-12-03T21:04:58" xmp:ModifyDate="2023-01-01T12:45:54-05:00" 
+        MicrosoftPhoto:DateAcquired="2016-12-19T09:30:26" xmpMM:InstanceID="uuid:faf5bdd5-ba3d-11da-ad31-d33d75182f1b"> <mwg-rs:Regions rdf:parseType="Resource"> 
+        <mwg-rs:AppliedToDimensions stDim:w="2868" stDim:h="2100" stDim:unit="pixel"/> <mwg-rs:RegionList> <rdf:Bag> <rdf:li> 
+        <rdf:Description mwg-rs:Name="John J Kauflin" mwg-rs:Type="Face"> <mwg-rs:Area stArea:x="0.6841" stArea:y="0.131429" stArea:w="0.209205" stArea:h="0.262857" 
+        stArea:unit="normalized"/> </rdf:Description> </rdf:li> <rdf:li> <rdf:Description mwg-rs:Name="Sandy Raju" mwg-rs:Type="Face"> <mwg-rs:Area stArea:x="0.362099" 
+        stArea:y="0.41619" stArea:w="0.200488" stArea:h="0.327619" stArea:unit="normalized"/> </rdf:Description> </rdf:li> 
+        <rdf:li> <rdf:Description mwg-rs:Name="Frank Scarpelli" mwg-rs:Type="Face"> <mwg-rs:Area stArea:x="0.0679916" stArea:y="0.11381" stArea:w="0.083682" 
+        stArea:h="0.137143" stArea:unit="normalized"/> </rdf:Description> </rdf:li> 
+        <rdf:li> <rdf:Description mwg-rs:Name="Tom Scarpelli" mwg-rs:Type="Face"> <mwg-rs:Area stArea:x="0.23431" stArea:y="0.149048" stArea:w="0.0801953" 
+        stArea:h="0.130476" stArea:unit="normalized"/> </rdf:Description> </rdf:li> </rdf:Bag> </mwg-rs:RegionList> </mwg-rs:Regions> </rdf:Description> </rdf:RDF> 
+        </x:xmpmeta>                                                                                                                                 
+        <?xpacket end="w"?>
+        */
         Int32 tempInt;
         bool done = false;
         for (int i = 0; i < byteLength && !done; i++)
@@ -264,14 +292,25 @@ public class WebSocketController : ControllerBase
                 if (tempStr.ToString().Contains(tagEndStr))
                 {
                     int pos = tempStr.ToString().IndexOf(tagEndStr);
-                    contentStr = tempStr.ToString().Substring(0, pos);
-                    done = true;
-                } 
+                    if (contentStr.Length > 0)
+                    {
+                        contentStr += ", ";
+                    }
+                    contentStr += tempStr.ToString().Substring(0, pos);
+                    tagFound = false;
+                    numCharsMatched = 0;
+                    tempStr = new StringBuilder();
+                    //done = true;
+                }
                 else
                 {
                     if (tempStr.ToString().Length > maxContentStrLength)
                     {
-                        contentStr = tempStr.ToString().Substring(0, 1000);
+                        if (contentStr.Length > 0)
+                        {
+                            contentStr += ", ";
+                        }
+                        contentStr += tempStr.ToString().Substring(0, 1000);
                         done = true;
                     }
                 }
@@ -360,6 +399,19 @@ public class WebSocketController : ControllerBase
                     }
                 }
 
+                if (dateFormat.Equals("yyyy "))
+                {
+                    // Strip off the beginning and ending characters ("\" or "(") form the year match
+                    dateStr = dateStr.Substring(0, 4);
+                    dateFormat = "yyyy";
+                }
+                if (dateFormat.Equals(" yyyy"))
+                {
+                    // Strip off the beginning and ending characters ("\" or "(") form the year match
+                    dateStr = dateStr.Substring(1, 4);
+                    dateFormat = "yyyy";
+                }
+
                 // D:\Photos\1 John J Kauflin\2009-to-2015\2013\04 Fall\Maria 459.jpg, date: \2013\, format: yyyy, *** PARSE FAILED *** 
                 // *** check the EXIF info on this one ??????????????
 
@@ -384,6 +436,107 @@ public class WebSocketController : ControllerBase
         return outDateTime;
     }
 
+    private void getPhotoMetadata()
+    {
+        //-----------------------------------------------------------------------------------------------------------------
+        // Get the metadata from the photo files
+        //-----------------------------------------------------------------------------------------------------------------
+        try
+        {
+
+            // >>>>>> check handling for PNG files and objects in the metadata - see Errors
+
+            /*
+            var file = ImageFile.FromFile(fi.FullName);
+            //var exifArtist = file.Properties.Get<ExifAscii>(ExifTag.Artist);
+            var exifCameraOwnerName = file.Properties.Get<ExifAscii>(ExifTag.CameraOwnerName);
+            peopleStr = exifCameraOwnerName.Value.Trim();
+            //var exifCopyright = file.Properties.Get<ExifAscii>(ExifTag.Copyright);
+            // Description
+            var exifDocumentName = file.Properties.Get<ExifAscii>(ExifTag.DocumentName);
+            //fileNameAndPath  (title)
+            var exifImageDescription = file.Properties.Get<ExifAscii>(ExifTag.ImageDescription);
+            // DateTimeOriginal    (Date taken)        {2022.12.29 16:50:31}
+            var exifDateTimeOriginal = file.Properties.Get<ExifDateTime>(ExifTag.DateTimeOriginal);
+            // DateTime            (Date modified)     {2023.01.10 19:49:54}   Modified:  1/10/2023  7:49/54 PM
+            //var exifDateTime = file.Properties.Get<ExifDateTime>(ExifTag.DateTime);
+            taken = exifDateTimeOriginal.Value;
+            */
+
+            /*
+            BodySerialNumber	42033	0xA431	ExifAscii	string
+            PageName	285	0x011D	ExifAscii	string
+            RelatedSoundFile	40964	0xA004	ExifAscii	string
+            DateTimeOriginal    (Date taken)        {2022.12.29 16:50:31}
+            DateTime            (Date modified)     {2023.01.10 19:49:54}   Modified:  1/10/2023  7:49/54 PM
+            */
+
+            /*
+            if (exifDateTimeOriginal == null)
+            {
+                file.Properties.Set(ExifTag.DateTimeOriginal, taken);
+            }
+            else
+            {
+                // If the Date from the filename is less than the Original DateTime, and it's more than 24 hours different,
+                // then set the Original to the earlier value
+                if (exifDateTimeOriginal.Value.CompareTo(taken) > 0 && exifDateTimeOriginal.Value.Subtract(taken).TotalHours.CompareTo(24) > 0)
+                {
+                    file.Properties.Set(ExifTag.DateTimeOriginal, taken);
+                }
+                else
+                {
+                    // If it's a good value, set the taken to the earlier date
+                    if (exifDateTimeOriginal.Value.CompareTo(minDateTime) > 0)
+                    {
+                        taken = exifDateTimeOriginal.Value;
+                    }
+                }
+            }
+
+            // If taken is not set, just use the file create date
+            if (taken.CompareTo(fi.CreationTime) > 0)
+            {
+                taken = fi.CreationTime;
+            }
+            */
+
+            /*
+            if (!category.Equals("Misc"))
+            {
+                file.Properties.Set(ExifTag.Artist, author);                                // John J Kauflin
+                file.Properties.Set(ExifTag.Copyright, taken.ToString("yyyy ") + author);   // YYYY John J Kauflin
+            }
+            file.Properties.Set(ExifTag.CameraOwnerName, peopleStr);                        // people list from Picasa people face tags
+            file.Properties.Set(ExifTag.DocumentName, "description");                       // description
+            file.Properties.Set(ExifTag.ImageDescription, fileNameAndPath);                 // title
+
+            file.Save(fi.FullName);
+            */
+        }
+        catch (Exception ex)
+        {
+            /*
+            log($"{index + 1} of {fileList.Count}, {fi.FullName}");
+            log($"  *** Error: {ex.Message}");
+            _log.LogError(ex, " *** Error getting file metadata");
+
+            //-----------------------------------------------------------------------------------------------------------------
+            // Get the Picasa people face tags between specific hard-coded RDF mwg-rs tags
+            //-----------------------------------------------------------------------------------------------------------------
+            peopleStr = getTagContent(fi, @"mwg-rs:Name=""", @""" mwg-rs:Type=""Face""");
+            //log($"people = {peopleStr}");
+
+            //-----------------------------------------------------------------------------------------------------------------
+            // Get the photo date taken from the file name
+            //-----------------------------------------------------------------------------------------------------------------
+            taken = getDateFromFilename(fi.FullName);
+            */
+        }
+
+
+    }
+
     private void UpdateFileInfo()
     {
         try
@@ -394,17 +547,38 @@ public class WebSocketController : ControllerBase
             // re-write to get these all in the same transaction (maybe load into a dictionary)
             string localPhotosRoot = configParamDict["LOCAL_PHOTOS_ROOT"];
             string photosStartDir = configParamDict["PHOTOS_START_DIR"];
+            string author = configParamDict["AUTHOR"];
 
             lastRunDate = DateTime.Parse(configParamDict["LastRunDate"]);
             
             // For TESTING
-            lastRunDate = DateTime.Parse("01/10/2023");
-            photosStartDir = "Photos/1 John J Kauflin/2023-to-2029/2023/01 Winter";
+            lastRunDate = DateTime.Parse("01/1/0001");
+            //photosStartDir = "Photos/1 John J Kauflin/2023-to-2029/2023/01 Winter";
+            //photosStartDir = "Photos/Mementos";
+
+            //int mediaTypeId = 2;  // Videos
+            int mediaTypeId = 3;    // Music
+
+            var mgr = new MediaGalleryRepository(null);
+            MediaGalleryAdmin.Model.MediaType mediaTypeRec = null;
+            using (var conn = new MySqlConnection(dbConnStr))
+            {
+                conn.Open();
+                mgr.setConnection(conn);
+                mediaTypeRec = mgr.getMediaType(mediaTypeId);
+            }
+
+            if (mediaTypeRec == null) 
+            {
+                throw new Exception($"Error: MediaType not found, Id = {mediaTypeId}");
+            }
+
 
             log($"Last Run = {lastRunDate.ToString("MM/dd/yyyy HH:mm:ss")}");
             var startDateTime = DateTime.Now.ToString("MM/dd/yyyy HH:mm:ss");
 
-            var root = new DirectoryInfo(localPhotosRoot + photosStartDir);
+            //var root = new DirectoryInfo(localPhotosRoot + photosStartDir);
+            var root = new DirectoryInfo(mediaTypeRec.LocalRoot);
             fileList.Clear();
             // Start the recursive function (which will only complete when all subsequent recursive calls are done)
             WalkDirectoryTree(root);
@@ -422,24 +596,22 @@ public class WebSocketController : ControllerBase
             int pos;
             string tempStr;
             string category;
+            string menu;
             DateTime taken;
-            string peopleStr;
-            var mgr = new MediaGalleryRepository(null);
+            string peopleStr = "";
             DateTime nullDate = new DateTime(0001, 1, 1);
             DateTime maxDateTime = new DateTime(9999, 1, 1);
+            DateTime minDateTime = new DateTime(1900, 1, 1);
+            var mediaCategory = new MediaCategory();
+            var menuItem = new Menu();
+            string ext;
+            string youtubeId;
+            string miscTitle;
 
-            //IEnumerable<Directory> directories;
-            //Directory subIfdDirectory;
-
-            //DateTime exifDateTime;
-            string exifDateTimeFormat = "yyyy:MM:dd HH:mm:ss";
-            string tStr;
-
-            while (index < fileList.Count && index < 2)
+            while (index < fileList.Count)
             {
                 fi = (FileInfo)fileList[index];
                 //_log.LogInformation($"{index + 1} of {fileList.Count}, {fi.FullName}");
-                log($"{index + 1} of {fileList.Count}, {fi.FullName}");
 
                 // Skip files in this directory
                 if (fi.FullName.Contains(".picasaoriginals"))
@@ -448,119 +620,261 @@ public class WebSocketController : ControllerBase
                     continue;
                 }
 
+                // D:\
                 fileNameAndPath = fi.FullName.Substring(localPhotosRoot.Length).Replace(@"\", @"/");
-                pos = fileNameAndPath.IndexOf(@"/");
-                tempStr = fileNameAndPath.Substring(pos+1);
-                pos = tempStr.IndexOf(@"/");
-                category = tempStr.Substring(0,pos);
+                // D:\Projects\johnkauflin\public_html\home\Media\Videos\3 Baker family\Misc\youtube.txt
+                //fileNameAndPath = fi.FullName.Replace(@"\", @"/");
 
-                // Get the photo date taken from the file name
-                taken = getDateFromFilename(fi.FullName);
-
-                //-----------------------------------------------------------------------------------------------------------------
-                // Get the metadata from the photo files
-                //-----------------------------------------------------------------------------------------------------------------
-                var file = ImageFile.FromFile(fi.FullName);
-                //foreach (var property in file.Properties)
-                //{
-                //    log($"  IFD:{property.IFD} Tag:{property.Tag} Name:{property.Name} Value:{property.Value} ");
-                //}
-
-                var exifArtist = file.Properties.Get<ExifAscii>(ExifTag.Artist);
-                var exifCameraOwnerName = file.Properties.Get<ExifAscii>(ExifTag.CameraOwnerName);
-                var exifCopyright = file.Properties.Get<ExifAscii>(ExifTag.Copyright);
-                var exifDocumentName = file.Properties.Get<ExifAscii>(ExifTag.DocumentName);
-                var exifImageDescription = file.Properties.Get<ExifAscii>(ExifTag.ImageDescription);
-                var exifDateTime = file.Properties.Get<ExifDateTime>(ExifTag.DateTime);
-                var exifDateTimeOriginal = file.Properties.Get<ExifDateTime>(ExifTag.DateTimeOriginal);
-
-                // "1 John J Kauflin" use "John J Kauflin"
-                // "5 Bands"
-                // if not "Misc" use John J Kauflin
-                file.Properties.Set(ExifTag.Artist, "new artist");
-                file.Properties.Set(ExifTag.CameraOwnerName, "new owner");  // people
-                file.Properties.Set(ExifTag.Copyright, "new copyright");
-                file.Properties.Set(ExifTag.DocumentName, "new doc name");  // title
-                file.Properties.Set(ExifTag.ImageDescription, "new image description");  // description
-
-                // note the explicit cast to ushort
-                //file.Properties.Set(ExifTag.ISOSpeedRatings, <ushort>200);
-                file.Save(fi.FullName);
-
-                /*
-1 of 10, D:\Photos\1 John J Kauflin\2023-to-2029\2023\01 Winter\20221229_215031020_iOS.jpg
-
-Artist              ExifAscii   string  (Authors)
-CameraOwnerName     ExifAscii   string
-Copyright	        ExifAscii	string	(Copyright)     © 2021 | Gavin Phillips     year name
-DocumentName	    ExifAscii	string
-ImageDescription    ExifAscii	string  (Title, Subject)
-
-BodySerialNumber	42033	0xA431	ExifAscii	string
-PageName	285	0x011D	ExifAscii	string
-RelatedSoundFile	40964	0xA004	ExifAscii	string
-
-DateTimeOriginal    (Date taken)        {2022.12.29 16:50:31}
-DateTime            (Date modified)     {2023.01.10 19:49:54}   Modified:  1/10/2023  7:49/54 PM
+                log($"{index + 1} of {fileList.Count}, {fileNameAndPath}");
 
 
-    IFD:Zeroth Tag:DateTime Name:DateTime Value:1/10/2023 7:49:54 PM                       *** when Picasa exported to a new file (when I moved to Photos) ***
-    IFD:EXIF Tag:DateTimeOriginal Name:DateTimeOriginal Value:12/29/2022 4:50:31 PM        *** when the photo was taken on the camera ***
-    IFD:EXIF Tag:DateTimeDigitized Name:DateTimeDigitized Value:12/29/2022 4:50:31 PM 
+                var dirParts = fileNameAndPath.Split("/");
+                category = dirParts[1];
+                //category = dirParts[7];
 
-
-DateTime	306	0x0132	ExifDateTime	DateTime
-DateTimeDigitized	36868	0x9004	ExifDateTime	DateTime
-DateTimeOriginal	36867	0x9003	ExifDateTime	DateTime
-                */
-
-                /*
-                        tStr = subIfdDirectory?.GetDescription(ExifDirectoryBase.TagDateTimeOriginal);
-                        if (!String.IsNullOrEmpty(tStr))
-                        {
-                            if (DateTime.TryParseExact(tStr, exifDateTimeFormat, null, System.Globalization.DateTimeStyles.None, out exifDateTime))
-                            {
-                                //Console.WriteLine($"{dateTimeStr}, tempStr = {tempStr}, dateFormat = {dateFormat}, outDateTime = {outDateTime}");
-                                if (exifDateTime.CompareTo(taken) < 0)
-                                {
-                                    taken = exifDateTime;
-                                }
-                            }
-                        }
-
-                // If taken is not set, just use the file create date
-                if (taken.CompareTo(fi.CreationTime) > 0)
+                // Take the 2nd segment, and remove any single quotes
+                //menu = dirParts[8].Replace(@"'", @"");
+                menu = dirParts[2].Replace(@"'", @"");
+                if (menu.Contains("."))
                 {
-                    taken = fi.CreationTime;
+                    menu = "Misc";
                 }
-                */
 
-                // Get the Picasa people face tags between specific hard-coded RDF mwg-rs tags
-                //peopleStr = getTagContent(fi, @"mwg-rs:Name=""", @""" mwg-rs:Type=""Face""");
-                //log($"people = {peopleStr}");
 
-                // *** need to check for DUPLICATES and how to handle the same image under different categories
-                // *** and how to build the menu structure from DB file info rather than the physical directories
+                ext = fi.Extension.ToUpper();
 
-                /*
+                miscTitle = menu;
+
+                taken = getDateFromFilename(fi.FullName);
+                if (taken.CompareTo(maxDateTime) == 0)
+                {
+                    taken = getDateFromFilename(fi.FullName);
+                }
+
+                //log($"category = {category}, menu = {menu}, taken = {taken}");
+
+
+                //log($"  line = {line}, date = {taken}, youtubeId = {youtubeId}, title = {miscTitle}");
                 using (var conn = new MySqlConnection(dbConnStr))
                 {
                     conn.Open();
                     mgr.setConnection(conn);
+
+                    // get the MediaCategory Id
+                    mediaCategory = mgr.getMediaCategory(mediaTypeId, category);
+                    if (mediaCategory == null)
+                    {
+                        throw new Exception($"*** Error: Category {category}, not found in media category table");
+                    }
+
+                    menuItem = mgr.getMenuItem(mediaCategory.CategoryId, menu);
+                    if (menuItem == null)
+                    {
+                        menuItem = new Menu();
+                        menuItem.CategoryId = mediaCategory.CategoryId;
+                        menuItem.MenuItem = menu;
+                        menuItem.SearchStr = "";
+                        mgr.insertMenuItem(menuItem);
+                    }
+
                     fiRec = mgr.getFileInfoTable(fi.Name);
                     if (fiRec != null)
                     {
-                        // Update
-                        fiRec.Category = category;
+                        log($"  >>>>> DUP  fi.Name = {fi.Name} ");
+
+                    }
+                    else
+                    {
+                        // Insert
+                        fiRec = new FileInfoTable();
+                        fiRec.Name = fi.Name;
+                        fiRec.MediaTypeId = mediaTypeId;
+                        fiRec.CategoryTags = category;
+                        fiRec.MenuTags = menu;
+                        fiRec.AlbumTags = "";
                         fiRec.FullNameLocal = fi.FullName;
                         fiRec.NameAndPath = fileNameAndPath;
                         fiRec.CreateDateTime = fi.CreationTime;
                         fiRec.LastModified = fi.LastWriteTime;
                         fiRec.TakenDateTime = taken;
+                        fiRec.Title = miscTitle;
+                        fiRec.Description = "Description";
+                        fiRec.People = peopleStr;
+                        fiRec.ToBeProcessed = 0;
+                        try
+                        {
+                            mgr.insertFileInfoTable(fiRec);
+                        }
+                        catch (Exception ex)
+                        {
+                            log($"{index + 1} of {fileList.Count}, {fi.FullName}  *** Exception on INSERT *** ");
+                        }
+                    }
+
+                    conn.Close();
+                }
+
+                /*
+                if (fi.Name.Equals("youtube.txt"))
+                {
+                    string[] lines = System.IO.File.ReadAllLines(fi.FullName);
+                    foreach (string line in lines)
+                    {
+                        taken = getDateFromFilename(line);
+                        if (taken.CompareTo(maxDateTime) == 0)
+                        {
+                            taken = getDateFromFilename(fi.FullName);
+                        }
+
+                        youtubeId = line;
+                        var lineParts = line.Split(":");
+                        if (lineParts.Length > 1)
+                        {
+                            miscTitle = lineParts[0];
+                            youtubeId = lineParts[1].Substring(1);
+                        }
+
+                        //log($"  line = {line}, date = {taken}, youtubeId = {youtubeId}, title = {miscTitle}");
+                        using (var conn = new MySqlConnection(dbConnStr))
+                        {
+                            conn.Open();
+                            mgr.setConnection(conn);
+
+                            // get the MediaCategory Id
+                            mediaCategory = mgr.getMediaCategory(mediaTypeId,category);
+                            if (mediaCategory == null)
+                            {
+                                throw new Exception($"*** Error: Category {category}, not found in media category table");
+                            }
+
+
+                            menuItem = mgr.getMenuItem(mediaCategory.CategoryId, menu);
+                            if (menuItem == null)
+                            {
+                                menuItem = new Menu();
+                                menuItem.CategoryId = mediaCategory.CategoryId;
+                                menuItem.MenuItem = menu;
+                                menuItem.SearchStr = "";
+                                mgr.insertMenuItem(menuItem);
+                            }
+
+
+                            //fiRec = mgr.getFileInfoTable(fi.Name);
+                            fiRec = mgr.getFileInfoTable(youtubeId);
+                            if (fiRec != null)
+                            {
+                                log($" DUP  line = {line}, date = {taken}, youtubeId = {youtubeId}, title = {miscTitle}");
+
+                            }
+                            else
+                            {
+                                // Insert
+                                fiRec = new FileInfoTable();
+                                fiRec.Name = youtubeId;
+                                fiRec.MediaTypeId = mediaTypeId;
+                                fiRec.CategoryTags = category;
+                                fiRec.MenuTags = menu;
+                                fiRec.AlbumTags = "";
+                                fiRec.FullNameLocal = fi.FullName;
+                                //fiRec.NameAndPath = fileNameAndPath;
+                                fiRec.NameAndPath = line;
+                                fiRec.CreateDateTime = fi.CreationTime;
+                                fiRec.LastModified = fi.LastWriteTime;
+                                fiRec.TakenDateTime = taken;
+                                fiRec.Title = miscTitle;
+                                fiRec.Description = "Description";
+                                fiRec.People = peopleStr;
+                                fiRec.ToBeProcessed = 1;
+                                try
+                                {
+                                    mgr.insertFileInfoTable(fiRec);
+                                }
+                                catch (Exception ex)
+                                {
+                                    log($"{index + 1} of {fileList.Count}, {fi.FullName}  *** Exception on INSERT *** ");
+                                }
+                            }
+
+                            conn.Close();
+                        }
+
+                    }
+                }
+                */
+
+                // Add only supported file types to the list
+                if (ext.Equals(".JPEG") || ext.Equals(".JPG") || ext.Equals(".PNG") || ext.Equals(".GIF"))
+                {
+                    // >>>>>> get Photo metadata
+                }
+
+                // *** need to check for DUPLICATES and how to handle the same image under different categories
+                // *** and how to build the menu structure from DB file info rather than the physical directories
+                /*
+                using (var conn = new MySqlConnection(dbConnStr))
+                {
+                    conn.Open();
+                    mgr.setConnection(conn);
+
+                    // get the MediaCategory Id
+                    mediaCategory = mgr.getMediaCategory(category);
+                    if (mediaCategory == null)
+                    {
+                        throw new Exception($"*** Error: Category {category}, not found in media category table");
+                    }
+
+
+                    menuItem = mgr.getMenuItem(mediaCategory.CategoryId,menu);
+                    if (menuItem == null)
+                    {
+                        menuItem = new Menu();
+                        menuItem.CategoryId = mediaCategory.CategoryId;
+                        menuItem.MenuItem = menu;
+                        menuItem.SearchStr = "";
+                        mgr.insertMenuItem(menuItem);
+                    }
+
+
+                    fiRec = mgr.getFileInfoTable(fi.Name);
+                    if (fiRec != null)
+                    {
+                        // Update
+                        if (!fiRec.CategoryTags.Contains(category))
+                        {
+                            if (!String.IsNullOrEmpty(fiRec.CategoryTags))
+                            {
+                                fiRec.CategoryTags += ",";
+                            }
+                            fiRec.CategoryTags += category;
+                        }
+
+                        if (!fiRec.MenuTags.Contains(menu))
+                        {
+                            if (!String.IsNullOrEmpty(fiRec.MenuTags))
+                            {
+                                fiRec.MenuTags += ",";
+                            }
+                            fiRec.MenuTags += menu;
+                        }
+
+
+                        // category
+                        // menu
+                        // *** get the
+
+
+                        //fiRec.FullNameLocal = fi.FullName;
+                        //fiRec.NameAndPath = fileNameAndPath;
+                        //fiRec.CreateDateTime = fi.CreationTime;
+                        //fiRec.LastModified = fi.LastWriteTime;
+                        fiRec.TakenDateTime = taken;
                         //fiRec.Title = "Title";
                         //fiRec.Description = "Description";
-                        //fiRec.People = peopleStr;
-                        fiRec.ToBeProcessed = 1;
+                        if (!String.IsNullOrEmpty(peopleStr))
+                        {
+                            fiRec.People = peopleStr;
+                        }
+                        //fiRec.ToBeProcessed = 1;
                         mgr.updateFileInfoTable(fiRec);
                     }
                     else
@@ -568,7 +882,10 @@ DateTimeOriginal	36867	0x9003	ExifDateTime	DateTime
                         // Insert
                         fiRec = new FileInfoTable();
                         fiRec.Name = fi.Name;
-                        fiRec.Category = category;
+                        fiRec.MediaTypeId = mediaTypeId;
+                        fiRec.CategoryTags = category;
+                        fiRec.MenuTags = menu;
+                        fiRec.AlbumTags = "";
                         fiRec.FullNameLocal = fi.FullName;
                         fiRec.NameAndPath = fileNameAndPath;
                         fiRec.CreateDateTime = fi.CreationTime;
@@ -587,7 +904,7 @@ DateTimeOriginal	36867	0x9003	ExifDateTime	DateTime
                             log($"{index + 1} of {fileList.Count}, {fi.FullName}  *** Exception on INSERT *** ");
                         }
                     }
-                    
+
                     conn.Close();
                 }
                 */
@@ -597,7 +914,7 @@ DateTimeOriginal	36867	0x9003	ExifDateTime	DateTime
             } // Loop through the file list
 
             // Update LastRunDate with the startDateTime from this run
-            UpdConfigParamValue("LastRunDate", startDateTime);
+            //UpdConfigParamValue("LastRunDate", startDateTime);
 
             timer.Stop();
             log($"END elapsed time = {timer.Elapsed.ToString()}");
@@ -706,7 +1023,7 @@ DateTimeOriginal	36867	0x9003	ExifDateTime	DateTime
 
                             // Make an HTTPS GET call to create the thumbnail and smaller files
                             createThumbnailUrl = webRootUrl + "/vendor/jkauflin/jjkgallery/createThumbnail.php?filePath=" + fiRec.NameAndPath;
-                            GetAsync(createThumbnailUrl).Wait();
+                            HttpGetAsync(createThumbnailUrl).Wait();
 
                             // Update the flag in the db for the file (to indicate processing is done)
                             using (var conn = new MySqlConnection(dbConnStr))
@@ -766,7 +1083,7 @@ DateTimeOriginal	36867	0x9003	ExifDateTime	DateTime
     } // public void FileTransfer()
 
 
-    static async Task GetAsync(string urlParam)
+    static async Task HttpGetAsync(string urlParam)
     {
         //log($"urlParam = {urlParam}");
         using HttpResponseMessage response = await httpClient.GetAsync(urlParam);
@@ -806,7 +1123,8 @@ DateTimeOriginal	36867	0x9003	ExifDateTime	DateTime
             {
                 ext = fi.Extension.ToUpper();
                 // Add only supported file types to the list
-                if (ext.Equals(".JPEG") || ext.Equals(".JPG") || ext.Equals(".PNG") || ext.Equals(".GIF"))
+                //if (ext.Equals(".JPEG") || ext.Equals(".JPG") || ext.Equals(".PNG") || ext.Equals(".GIF") || ext.Equals(".TXT"))
+                if (ext.Equals(".MP3"))
                 {
                     if (fi.LastWriteTime > lastRunDate)
                     {

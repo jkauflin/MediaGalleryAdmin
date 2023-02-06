@@ -47,6 +47,8 @@ try
     app.UseWebSockets(webSocketOptions);
     // </snippet_UseWebSockets>
 
+    // UseEnpoints (extra layer for API's in .NET 5) don't need anymore
+    // Default in .NET 6 mixes request pipeline with route management
     app.MapControllers();
     /*
     app.MapControllerRoute(

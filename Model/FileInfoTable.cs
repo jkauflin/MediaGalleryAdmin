@@ -7,7 +7,10 @@ namespace MediaGalleryAdmin.Model
     {
         [ExplicitKey]
         public string Name { get; set; }
-        public string Category { get; set; }
+        public int MediaTypeId { get; set; }
+        public string CategoryTags { get; set; }
+        public string MenuTags { get; set; }
+        public string AlbumTags { get; set; }
         public string FullNameLocal { get; set; }
         public string NameAndPath { get; set; }
         public DateTime CreateDateTime { get; set; }

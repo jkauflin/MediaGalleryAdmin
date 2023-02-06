@@ -1,0 +1,137 @@
+﻿<!doctype html>
+<html class="no-js" lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>MediaGalleryAdmin</title>
+    <link rel="icon" href="favicon.ico?ver=1.002">
+
+    <!-- Bootstrap core CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet"
+          integrity="sha384-rbsA2VBKQhggwzxH7pPCaAqO46MgnOM80zW1RWuH61DGLwZJEdK2Kadq2F9CUG65" crossorigin="anonymous">
+    <link href="https://stackpath.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css" rel="stylesheet"
+          integrity="sha384-wvfXpqpZZVQGK6TAh5PVlGOfQNHSoD2xbE+QkPxCAFlNEevoEH3Sl0sibVcOQVnN" crossorigin="anonymous" />
+</head>
+
+<body>
+    <nav class="navbar navbar-expand-sm bg-dark navbar-dark" role="navigation">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="index.html">Media Gallery Admin</a>
+            <button class="navbar-toggler shadow-none" type="button" data-bs-toggle="collapse" data-bs-target="#collapsibleNavbar">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <!-- Navbar links -->
+            <div class="collapse navbar-collapse justify-content-end" id="collapsibleNavbar">
+                <ul class="nav navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link active" data-bs-toggle="tab" href="#HomePage">
+                            <i class="fa fa-home"></i> Home
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" data-bs-toggle="tab" href="#EditPage" >
+                            <i class="fa fa-pencil" style="font-size: 1rem;"></i> Edit
+                        </a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid">
+        <div class="tab-content">
+
+            <div class="tab-pane show active" id="HomePage">
+                <form id="InputValues" action="#">
+                    <div class="row">
+                        <div class="col-4">
+                            <button id="UpdFileInfoButton" type="button" class="btn btn-primary m-2">Update File Info</button>
+                            <button id="FileTransferButton" type="button" class="btn btn-success m-2">Transfer Files</button>
+                        </div>
+
+                        <div class="col-8">
+                            <textarea id="LogMessageDisplay" class="form-control form-control-sm mt-3 " rows="23" readonly>
+                        </textarea>
+                        </div>
+                    </div>
+                </form>
+
+                <div id="UpdateDisplay" class="m-2"></div>
+            </div>
+
+            <div class="tab-pane" id="EditPage">
+                <div class="row">
+
+                    <div class="col-sm-5 col-md-3 d-none d-sm-block">
+                        <h5 id=MediaHeader></h5>
+                        <div id="MediaMenu"></div>
+                        <button id="EditFileInfoButton" type="button" class="btn btn-primary m-2">Edit File Info</button>
+                    </div>
+
+                    <div class="col-sm-7 col-md-9">
+                        <div id="MediaFilterInputValues" class="container my-2">
+                            <div class="row">
+                                <input id="MediaFilterMediaType" type="hidden" class="form-control" value="1">
+                                <input id="MediaFilterMenuItem" type="hidden" class="form-control" value="">
+                                <input id="MediaFilterAlbumTag" type="hidden" class="form-control" value="">
+
+                                <div class="col-4">
+                                    <button class="btn btn-primary float-start" type="button" data-bs-toggle="offcanvas" data-bs-target="#MediaMenuCanvas">
+                                        <i class="fa fa-chevron-right"></i> Menu
+                                    </button>
+                                </div>
+
+                                <div class="col">
+                                    <select id="MediaFilterCategory" class="form-select float-start shadow-none">
+                                        <option value="0">ALL</option>
+                                        <option selected value="1 John J Kauflin">1 John J Kauflin</option>
+                                        <option value="2 John E Kauflin">2 John E Kauflin</option>
+                                        <option value="3 Baker Family">3 Baker Family</option>
+                                        <option value="4 Mann Family">4 Mann Family</option>
+                                        <option value="5 Bands">5 Bands</option>
+                                        <option value="Mementos">Mementos</option>
+                                        <option value="Misc">Misc</option>
+                                        <option value="Albums">Albums</option>
+                                    </select>
+                                </div>
+                                <div class="col-2">
+                                    <button id="MediaFilterButton" type="button" class="btn btn-success float-start shadow-none">Filter</button>
+                                </div>
+                            </div>
+
+                            <div class="row mt-2">
+                                <div class="col">
+                                    <input id="MediaFilterStartDate" type="date" class="form-control shadow-none" value="2023-01-01">
+                                </div>
+                                <div class="col">
+                                    <input id="MediaFilterSearchStr" type="text" class="form-control shadow-none" placeholder="Search string">
+                                </div>
+                            </div>
+
+                        </div>
+
+                        <div id="MediaFolders">
+                        </div>
+
+                        <div id="MediaThumbnails"></div>
+                    </div>
+                </div><!-- row -->
+            </div><!-- end of Media -->
+
+
+        </div><!-- end of main tab content -->
+    </div><!-- end of main container -->
+
+
+    <!-- Bootstrap core JavaScript ================================================== -->
+    <!-- Placed at the end of the document so the pages load faster -->
+    <!-- Bootstrap 5 JavaScript Bundle with Popper -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"
+            integrity="sha384-kenU1KFdBIe4zVF0s0G1M5b4hcpxyD9F7jL+jjXkk+Q2h455rYXK/7HAuoJl+0I4" crossorigin="anonymous"></script>
+
+    <script src="js/main.js?ver=2.001"></script>
+
+</body>
+</html>

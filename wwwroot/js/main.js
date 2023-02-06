@@ -1,5 +1,5 @@
 /*==============================================================================
- * (C) Copyright 2017,2019,2021,2022 John J Kauflin, All rights reserved.
+ * (C) Copyright 2022,2023 John J Kauflin, All rights reserved.
  *----------------------------------------------------------------------------
  * DESCRIPTION: Client-side JS functions and logic for web app
  *----------------------------------------------------------------------------
@@ -19,15 +19,38 @@
  *                  and converted to use straight javascript
  * 2022-10-20 JJK   Re-implemented websocket connection to display async log
  * 2022-12-17 JJK   Re-implemented using .NET 6 C# backend server
+ * 2023-02-05 JJK   Updated to Bootstrap v5.2, and other nav and menu
+ *                  improvements from recent website changes
  *============================================================================*/
 var main = (function () {
     'use strict';
+
+    // Keep track of the state of the navbar collapse (shown or hidden)
+    var navbarCollapseShown = false;
+    var collapsibleNavbar = document.getElementsByClassName("navbar-collapse")[0];
+    collapsibleNavbar.addEventListener('hidden.bs.collapse', function () {
+        navbarCollapseShown = false;
+    })
+    collapsibleNavbar.addEventListener('shown.bs.collapse', function () {
+        navbarCollapseShown = true;
+    })
+
+    // Listen for nav-link clicks
+    document.querySelectorAll("a.nav-link").forEach(el => el.addEventListener("click", function (event) {
+        // Automatically hide the navbar collapse when an item link is clicked (and the collapse is currently shown)
+        if (navbarCollapseShown) {
+            new bootstrap.Collapse(document.getElementsByClassName("navbar-collapse")[0]).hide();
+        }
+    }));
 
     //=================================================================================================================
     // Bind events
     //document.getElementById("ClearLogButton").addEventListener("click", _clearLog);
     document.getElementById("UpdFileInfoButton").addEventListener("click", _updFileInfo);
     document.getElementById("FileTransferButton").addEventListener("click", _fileTransfer);
+
+    document.getElementById("EditFileInfoButton").addEventListener("click", _editFileInfo);
+
 
     //=================================================================================================================
     // Module methods
@@ -41,6 +64,23 @@ var main = (function () {
         _executeServerTask("FileTransfer")
     }
 
+    function _editFileInfo(event) {
+
+        //let url = jjkgalleryRoot + "getMenuList.php"
+        let url = "GetFileInfoList"
+        //let urlParamStr = `?mediaType=${mediaType}`
+        //fetch(url + urlParamStr)
+        fetch(url)
+            .then(response => response.json())
+            .then(menuList => {
+                //buildMenuElements(mediaType, MediaMenuId, menuList)
+                //buildMenuElements(mediaType, MediaOffcanvasMenuId, menuList)
+                console.log(">>> after the Fetch")
+            });
+
+    }
+
+    /*
     function _update(event) {
         let url = 'UpdateConfig';
         fetch(url, {
@@ -65,6 +105,7 @@ var main = (function () {
             document.getElementById("UpdateDisplay").innerHTML = "Fetch data FAILED - check log";
         });
     }
+    */
 
     // Try to establish a websocket connection with the server to execute a task
     function _executeServerTask(taskName) {

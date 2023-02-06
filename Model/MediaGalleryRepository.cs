@@ -10,7 +10,8 @@ DESCRIPTION:  Class to handle interactions with the database repository
     logic and the "Dapper" work so calling apps don't have to include that
 
 -------------------------------------------------------------------------------
-2022-12-27 JJK   Initial version
+2022-12-27 JJK  Initial version
+2023-01-28 JJK  Added read of MediaType table
 ===============================================================================*/
 
 using MySqlConnector;
@@ -55,6 +56,22 @@ namespace MediaGalleryAdmin.Model
             }
         }
 
+        public List<MediaType> getMediaTypeList()
+        {
+            return conn.Query<MediaType>("SELECT * FROM MediaType").AsList();
+        }
+
+        public MediaType getMediaType(int mediaTypeId)
+        {
+            /*
+            string sql = String.Format("SELECT * FROM FileInfo"
+                            + " WHERE Name = '{0}' ", Name);
+            //Console.WriteLine("{0:yyyy-MM-dd HH:mm:ss.fff}, sql = {1}", DateTime.Now, sql);
+            return conn.QuerySingleOrDefault<FileInfoTable>(sql);
+            */
+            return conn.Get<MediaType>(mediaTypeId);
+        }
+
         public bool updFileInfoToBeProcessed(string Name, bool ToBeProcessed)
         {
             bool updSuccess = true;
@@ -71,6 +88,33 @@ namespace MediaGalleryAdmin.Model
 
             return updSuccess;
         }
+
+        public MediaCategory getMediaCategory(int mediaTypeId, string categoryName)
+        {
+            string sql = String.Format("SELECT * FROM MediaCategory"
+                            + " WHERE MediaTypeId = {0} AND CategoryName = '{1}' ", mediaTypeId, categoryName);
+            //Console.WriteLine("{0:yyyy-MM-dd HH:mm:ss.fff}, sql = {1}", DateTime.Now, sql);
+            return conn.QuerySingleOrDefault<MediaCategory>(sql);
+        }
+
+        public Menu getMenuItem(int categoryId, string menuItem)
+        {
+            string sql = String.Format("SELECT * FROM Menu"
+                            + " WHERE CategoryId = {0} AND MenuItem = '{1}' ", categoryId, menuItem);
+            //Console.WriteLine("{0:yyyy-MM-dd HH:mm:ss.fff}, sql = {1}", DateTime.Now, sql);
+            return conn.QuerySingleOrDefault<Menu>(sql);
+        }
+
+
+        public bool updateMenuItem(Menu menuItem)
+        {
+            return conn.Update(menuItem);
+        }
+        public long insertMenuItem(Menu menuItem)
+        {
+            return conn.Insert(menuItem);
+        }
+
 
         public FileInfoTable getFileInfoTable(string Name)
         {
