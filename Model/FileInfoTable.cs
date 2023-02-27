@@ -13,6 +13,7 @@ namespace MediaGalleryAdmin.Model
         public string AlbumTags { get; set; }
         public string FullNameLocal { get; set; }
         public string NameAndPath { get; set; }
+        public string FilePath { get; set; }
         public DateTime CreateDateTime { get; set; }
         public DateTime LastModified { get; set; }
         public DateTime TakenDateTime { get; set; }

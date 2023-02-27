@@ -9,5 +9,6 @@ namespace MediaGalleryAdmin.Model
 		public int MediaTypeId { get; set; }
 		public string MediaTypeDesc { get; set; }
         public string LocalRoot { get; set; }
-	}
+        public DateTime LastFileTransfer { get; set; }
+    }
 }

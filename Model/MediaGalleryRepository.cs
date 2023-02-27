@@ -72,6 +72,11 @@ namespace MediaGalleryAdmin.Model
             return conn.Get<MediaType>(mediaTypeId);
         }
 
+        public bool updateMediaType(MediaType mediaType)
+        {
+            return conn.Update(mediaType);
+        }
+
         public bool updFileInfoToBeProcessed(string Name, bool ToBeProcessed)
         {
             bool updSuccess = true;
@@ -135,6 +140,20 @@ namespace MediaGalleryAdmin.Model
         {
             return conn.Insert(fiRec);
         }
+
+        public People getPeople(string peopleName)
+        {
+            string sql = String.Format("SELECT * FROM People"
+                            + " WHERE PeopleName = '{0}' ", peopleName);
+            //Console.WriteLine("{0:yyyy-MM-dd HH:mm:ss.fff}, sql = {1}", DateTime.Now, sql);
+            return conn.QuerySingleOrDefault<People>(sql);
+        }
+
+        public long insertPeople(People peopleRec)
+        {
+            return conn.Insert(peopleRec);
+        }
+
 
 
         public List<FileInfoTable> getFileInfoTableList(int maxRows = 100)

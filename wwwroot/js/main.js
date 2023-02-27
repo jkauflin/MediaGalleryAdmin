@@ -45,11 +45,10 @@ var main = (function () {
 
     //=================================================================================================================
     // Bind events
-    //document.getElementById("ClearLogButton").addEventListener("click", _clearLog);
-    document.getElementById("UpdFileInfoButton").addEventListener("click", _updFileInfo);
+    //document.getElementById("UpdFileInfoButton").addEventListener("click", _updFileInfo);
     document.getElementById("FileTransferButton").addEventListener("click", _fileTransfer);
 
-    document.getElementById("EditFileInfoButton").addEventListener("click", _editFileInfo);
+    //document.getElementById("EditFileInfoButton").addEventListener("click", _editFileInfo);
 
 
     //=================================================================================================================
