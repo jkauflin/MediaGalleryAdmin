@@ -3,7 +3,7 @@
 namespace MediaGalleryAdmin.Model
 {
     [Table("MediaType")]
-    public class MediaType
+    public class MediaTypeTable
     {
         [Key]
 		public int MediaTypeId { get; set; }

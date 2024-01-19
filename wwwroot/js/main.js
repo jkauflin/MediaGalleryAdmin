@@ -45,9 +45,10 @@ var main = (function () {
 
     //=================================================================================================================
     // Bind events
-    //document.getElementById("UpdFileInfoButton").addEventListener("click", _updFileInfo);
+    document.getElementById("UpdFileInfoButton").addEventListener("click", _updFileInfo);
     document.getElementById("FileTransferButton").addEventListener("click", _fileTransfer);
-
+    document.getElementById("AddMusicButton").addEventListener("click", _addMusicAlbum);
+    
     //document.getElementById("EditFileInfoButton").addEventListener("click", _editFileInfo);
 
 
@@ -62,6 +63,12 @@ var main = (function () {
         document.getElementById("LogMessageDisplay").innerHTML = "Starting File Transfer"
         _executeServerTask("FileTransfer")
     }
+
+    function _addMusicAlbum(event) {
+        document.getElementById("LogMessageDisplay").innerHTML = "Adding Music Album"
+        _executeServerTask("AddMusicAlbum")
+    }
+
 
     function _editFileInfo(event) {
 

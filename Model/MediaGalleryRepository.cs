@@ -56,12 +56,12 @@ namespace MediaGalleryAdmin.Model
             }
         }
 
-        public List<MediaType> getMediaTypeList()
+        public List<MediaTypeTable> getMediaTypeList()
         {
-            return conn.Query<MediaType>("SELECT * FROM MediaType").AsList();
+            return conn.Query<MediaTypeTable>("SELECT * FROM MediaType").AsList();
         }
 
-        public MediaType getMediaType(int mediaTypeId)
+        public MediaTypeTable getMediaType(int mediaTypeId)
         {
             /*
             string sql = String.Format("SELECT * FROM FileInfo"
@@ -69,10 +69,10 @@ namespace MediaGalleryAdmin.Model
             //Console.WriteLine("{0:yyyy-MM-dd HH:mm:ss.fff}, sql = {1}", DateTime.Now, sql);
             return conn.QuerySingleOrDefault<FileInfoTable>(sql);
             */
-            return conn.Get<MediaType>(mediaTypeId);
+            return conn.Get<MediaTypeTable>(mediaTypeId);
         }
 
-        public bool updateMediaType(MediaType mediaType)
+        public bool updateMediaType(MediaTypeTable mediaType)
         {
             return conn.Update(mediaType);
         }

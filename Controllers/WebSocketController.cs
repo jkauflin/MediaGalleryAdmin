@@ -1,5 +1,5 @@
 /*==============================================================================
- * (C) Copyright 2017,2022,2023 John J Kauflin, All rights reserved.
+ * (C) Copyright 2017,2022,2023,2024 John J Kauflin, All rights reserved.
  *----------------------------------------------------------------------------
  * DESCRIPTION:  Server-side Controller to handle websocket requests with
  *               a specified task to execute
@@ -54,11 +54,15 @@
  * 2023-02-24 JJK   Modified to do file transfer for new files, including
  *                  calculation of date taken, update of photo metadata,
  *                  FTP of file, and call to create thumbnail
+ * 2023-08-18 JJK   Uncommented Update File Info to work on fixes like
+ *                  bad paths
+ * 2024-01-14 JJK   Implement a screen up upload a music album
  *============================================================================*/
 using System.Collections;
 using System.Diagnostics;
 using System.Net.WebSockets;
 using System.Text;
+using System.IO;
 using Microsoft.AspNetCore.Mvc;
 using FluentFTP;
 using MySqlConnector;
@@ -69,6 +73,8 @@ using System.Text.RegularExpressions;
 using static System.Net.Mime.MediaTypeNames;
 
 using ExifLibrary;
+using System;
+using Microsoft.AspNetCore.Mvc.Formatters;
 
 namespace MediaGalleryAdmin.Controllers;
 
@@ -204,11 +210,15 @@ public class WebSocketController : ControllerBase
             if (taskName.Equals("FileTransfer"))
             {
                 TransferNewFiles();
-                //FileTransfer();
+                //AllFileTransfer();
             }
             else if (taskName.Equals("UpdateFileInfo"))
             {
                 UpdateFileInfo();
+            }
+            else if (taskName.Equals("AddMusicAlbum"))
+            {
+                AddMusicAlbum();
             }
 
             // Close the websocket after completion
@@ -554,7 +564,7 @@ public class WebSocketController : ControllerBase
 
     private DateTime setPhotoMetadata(FileInfo fi)
     {
-        DateTime taken;
+        DateTime taken = DateTime.Parse("01/01/0001");
 
         //-----------------------------------------------------------------------------------------------------------------
         // Get the metadata from the photo files
@@ -617,6 +627,11 @@ public class WebSocketController : ControllerBase
             }
         }
 
+        if (taken.ToString("yyyy").Equals("0000"))
+        {
+            taken = DateTime.Parse("01/01/0001");
+        }
+
         return taken;
     }
 
@@ -635,7 +650,7 @@ public class WebSocketController : ControllerBase
             int mediaTypeId = 1;    // Photos
 
             var mgr = new MediaGalleryRepository(null);
-            MediaType mediaTypeRec = null;
+            MediaTypeTable mediaTypeRec = null;
             using (var conn = new MySqlConnection(dbConnStr))
             {
                 conn.Open();
@@ -649,19 +664,17 @@ public class WebSocketController : ControllerBase
             }
 
             lastRunDate = mediaTypeRec.LastFileTransfer;
-
             // For TESTING
             //lastRunDate = DateTime.Parse("01/1/0001");
+            //lastRunDate = DateTime.Parse("11/11/2023");
             //photosStartDir = "Photos/1 John J Kauflin/2023-to-2029/2023/01 Winter";
             //photosStartDir = "Photos/Mementos";
 
             log($"Last Run = {lastRunDate.ToString("MM/dd/yyyy HH:mm:ss")}");
             var startDateTime = DateTime.Now;
 
-            //var root = new DirectoryInfo(localPhotosRoot + photosStartDir);
-            //var root = new DirectoryInfo(mediaTypeRec.LocalRoot);
-            var rootPath = mediaTypeRec.LocalRoot + "/" + mediaTypeRec.MediaTypeDesc;
-
+            var rootPath = mediaTypeRec.LocalRoot + mediaTypeRec.MediaTypeDesc;
+            //var rootPath = "C:/Users/johnk/Downloads/TempUpload";
             var root = new DirectoryInfo(rootPath);
             fileList.Clear();
             // Start the recursive function (which will only complete when all subsequent recursive calls are done)
@@ -694,7 +707,7 @@ public class WebSocketController : ControllerBase
                     continue;
                 }
 
-                var dirParts = fi.FullName.Substring(rootPath.Length).Replace(@"\", @"/").Split('/');
+                var dirParts = fi.FullName.Substring(rootPath.Length+1).Replace(@"\", @"/").Split('/');
                 filePath = "";
                 for (int i = 0; i < dirParts.Length-1; i++)
                 {
@@ -704,10 +717,18 @@ public class WebSocketController : ControllerBase
                     }
                     filePath += dirParts[i];
                 }
+                // If there is a file path, add a slash at the end
+                if (!filePath.Equals(""))
+                {
+                    filePath += "/";
+                }
 
                 taken = setPhotoMetadata(fi);
+                // check if taken is '0000-00-00'
+                //lastRunDate.ToString("MM/dd/yyyy HH:mm:ss")
+
                 ext = fi.Extension.ToUpper();
-                log($"{index + 1} of {fileList.Count}, {filePath}/{fi.Name}, taken = {taken}");
+                log($"{index + 1} of {fileList.Count}, {filePath}{fi.Name}, taken = {taken}");
 
                 using (var conn = new MySqlConnection(dbConnStr))
                 {
@@ -747,7 +768,8 @@ public class WebSocketController : ControllerBase
                     conn.Close();
                 }
 
-                var tempName = mediaTypeRec.MediaTypeDesc + "/" + filePath + "/" + fi.Name;
+                //var tempName = mediaTypeRec.MediaTypeDesc + "/" + filePath + "/" + fi.Name;
+                var tempName = mediaTypeRec.MediaTypeDesc + "/" + filePath + fi.Name;
                 ftpFile(fi.FullName, tempName);
 
                 // Increment to the next file if all operations were successful
@@ -820,13 +842,15 @@ public class WebSocketController : ControllerBase
                     ftpConn.Config.RetryAttempts = 3;
                     //var tempName = remoteMediaRoot + remotePathAndName;
                     //ftpConn.UploadFile(fullName, tempName, FtpRemoteExists.Overwrite, true, FtpVerify.Retry);
-                    ftpConn.UploadFile(fullName, remotePathAndName, FtpRemoteExists.Overwrite, true, FtpVerify.Retry);
-                    log($"  >>> FTP successful");
+                    //ftpConn.UploadFile(fullName, remotePathAndName, FtpRemoteExists.Overwrite, true, FtpVerify.Retry);
+                    ftpConn.UploadFile(fullName, remotePathAndName, FtpRemoteExists.Skip, true, FtpVerify.Retry);
+                    //log($"  >>> FTP successful");
 
                     // Make an HTTPS GET call to create the thumbnail and smaller files
                     createThumbnailUrl = webRootUrl + "/vendor/jkauflin/jjkgallery/createThumbnail.php?filePath=" + remotePathAndName;
                     HttpGetAsync(createThumbnailUrl).Wait();
-                    log($"  >>> Create Thumbnail successful");
+
+                    _log.LogInformation($"  >>> FTP and Create Thumbnail successful");
 
                     done = true;
                 }
@@ -873,14 +897,10 @@ public class WebSocketController : ControllerBase
             timer.Start();
 
             // re-write to get these all in the same transaction (maybe load into a dictionary)
-            string localPhotosRoot = configParamDict["LOCAL_PHOTOS_ROOT"];
-            string photosStartDir = configParamDict["PHOTOS_START_DIR"];
-            string author = configParamDict["AUTHOR"];
+            //string localPhotosRoot = configParamDict["LOCAL_PHOTOS_ROOT"];
+            //string photosStartDir = configParamDict["PHOTOS_START_DIR"];
+            author = configParamDict["AUTHOR"];
 
-            lastRunDate = DateTime.Parse(configParamDict["LastRunDate"]);
-            
-            // For TESTING
-            lastRunDate = DateTime.Parse("01/1/0001");
             //photosStartDir = "Photos/1 John J Kauflin/2023-to-2029/2023/01 Winter";
             //photosStartDir = "Photos/Mementos";
 
@@ -889,7 +909,7 @@ public class WebSocketController : ControllerBase
             int mediaTypeId = 1;    // Photos
 
             var mgr = new MediaGalleryRepository(null);
-            MediaGalleryAdmin.Model.MediaType mediaTypeRec = null;
+            MediaTypeTable mediaTypeRec = null;
             using (var conn = new MySqlConnection(dbConnStr))
             {
                 conn.Open();
@@ -897,17 +917,21 @@ public class WebSocketController : ControllerBase
                 mediaTypeRec = mgr.getMediaType(mediaTypeId);
             }
 
-            if (mediaTypeRec == null) 
+            if (mediaTypeRec == null)
             {
                 throw new Exception($"Error: MediaType not found, Id = {mediaTypeId}");
             }
 
+            //lastRunDate = mediaTypeRec.LastFileTransfer;
+            // For TESTING
+            lastRunDate = DateTime.Parse("08/01/0001");
 
             log($"Last Run = {lastRunDate.ToString("MM/dd/yyyy HH:mm:ss")}");
             var startDateTime = DateTime.Now.ToString("MM/dd/yyyy HH:mm:ss");
 
-            //var root = new DirectoryInfo(localPhotosRoot + photosStartDir);
-            var root = new DirectoryInfo(mediaTypeRec.LocalRoot);
+            var rootPath = mediaTypeRec.LocalRoot + mediaTypeRec.MediaTypeDesc;
+            //var rootPath = "C:\\Users\\johnk\\PhotosTEMP\\Ollie";
+            var root = new DirectoryInfo(rootPath);
             fileList.Clear();
             // Start the recursive function (which will only complete when all subsequent recursive calls are done)
             WalkDirectoryTree(root);
@@ -919,9 +943,13 @@ public class WebSocketController : ControllerBase
             }
 
             int index = 0;
+            // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> RE-START <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+            //index = 23712;
+
             FileInfo fi;
             FileInfoTable fiRec;
             string fileNameAndPath;
+            string filePath;
             int pos;
             string tempStr;
             string category;
@@ -934,6 +962,10 @@ public class WebSocketController : ControllerBase
             string youtubeId;
             string miscTitle;
 
+            string recPath = "";
+            string localPath = "";
+
+            int fixedCnt = 0;
             while (index < fileList.Count)
             {
                 fi = (FileInfo)fileList[index];
@@ -946,15 +978,27 @@ public class WebSocketController : ControllerBase
                     continue;
                 }
 
-                // D:\
-                //fileNameAndPath = fi.FullName.Substring(localPhotosRoot.Length).Replace(@"\", @"/");
-                // D:\Projects\johnkauflin\public_html\home\Media\Videos\3 Baker family\Misc\youtube.txt
-                //fileNameAndPath = fi.FullName.Replace(@"\", @"/");
+                var dirParts = fi.FullName.Substring(rootPath.Length + 1).Replace(@"\", @"/").Split('/');
+                filePath = "";
+                for (int i = 0; i < dirParts.Length - 1; i++)
+                {
+                    if (i > 0)
+                    {
+                        filePath += "/";
+                    }
+                    filePath += dirParts[i];
+                }
+                // If there is a file path, add a slash at the end
+                if (!filePath.Equals(""))
+                {
+                    filePath += "/";
+                }
 
-                //log($"{index + 1} of {fileList.Count}, {fileNameAndPath}");
+                // Only want to do this for NEW transfers ????????????????
+                // taken = setPhotoMetadata(fi);
 
-                ext = fi.Extension.ToUpper();
-
+                //ext = fi.Extension.ToUpper();
+                log($"{index + 1} of {fileList.Count}, {fi.Name} ");
 
                 using (var conn = new MySqlConnection(dbConnStr))
                 {
@@ -964,28 +1008,73 @@ public class WebSocketController : ControllerBase
                     fiRec = mgr.getFileInfoTable(fi.Name);
                     if (fiRec != null)
                     {
-                        if (!String.IsNullOrEmpty(fiRec.People))
+                        if (System.IO.File.Exists(fiRec.FullNameLocal))
                         {
-                            //log($"  >>>>> fi.Name = {fi.Name}, People = {fiRec.People}");
-                            var peopleNames = fiRec.People.Split(",");
-                            foreach (var person in peopleNames)
-                            {
-                                var tempPeople = person.Trim().Replace(@"'", @"");
-                                var peopleRec = mgr.getPeople(tempPeople);
-                                if (peopleRec == null)
-                                {
-                                    peopleRec = new People();
-                                    peopleRec.PeopleName = tempPeople;
-                                    mgr.insertPeople(peopleRec);
-                                }
-                            }
+
+                        }
+                        else
+                        {
+                            log($"{index + 1} of {fileList.Count}, *** NOT EXISTS *** {fiRec.FullNameLocal}");
                         }
                     }
-
                     conn.Close();
-                }
+                } // using (var conn = new MySqlConnection(dbConnStr))
 
 
+
+                //var tempName = mediaTypeRec.MediaTypeDesc + "/" + filePath + fi.Name;
+                //ftpFile(fi.FullName, tempName);
+
+                /*
+                        if (System.IO.File.Exists(fiRec.FullNameLocal))
+                        {
+                            fiRec.AlbumTags += " AL9";
+                            mgr.updateFileInfoTable(fiRec);
+                        }
+
+
+                        if (fiRec.People.Contains("Rachael"))
+                        {
+                            tempStr = fiRec.People.Replace("Rachael", "Rachel");
+                            fiRec.People = tempStr;
+
+
+                        if (!String.IsNullOrEmpty(fiRec.FilePath))
+                        {
+                            //if (!fiRec.FilePath.Substring(fiRec.FilePath.Length - 1, 1).Equals("/"))
+                            if (fiRec.FilePath.LastIndexOf('/') == (fiRec.FilePath.Length - 1))
+                            {
+                                    localPath = rootPath + "/" + fiRec.FilePath + fi.Name;
+                            }
+                            else
+                            {
+                                localPath = rootPath + "/" + fiRec.FilePath + "/" + fi.Name;
+                            }
+                        }
+                        else if (!String.IsNullOrEmpty(fiRec.NameAndPath))
+                        {
+                            localPath = mediaTypeRec.LocalRoot + fiRec.NameAndPath;
+                        }
+                        else
+                        {
+                            index++;
+                            continue;
+                        }
+
+                        if (!System.IO.File.Exists(localPath))
+                        {
+                            log($"  *** Not Found, {localPath}");
+                            log($" FullNameLocal = {fiRec.FullNameLocal}");
+                            log($"   fi.FullName = {fi.FullName}");
+                            log($"      filePath = {filePath}");
+
+                            fiRec.FullNameLocal = fi.FullName;
+                            fiRec.FilePath = filePath;
+                            //fiRec.ToBeProcessed = 1;
+                            mgr.updateFileInfoTable(fiRec);
+                        }
+
+                */
                 /*
                 var dirParts = fileNameAndPath.Split("/");
                 category = dirParts[1];
@@ -1114,156 +1203,9 @@ public class WebSocketController : ControllerBase
                                 menuItem.SearchStr = "";
                                 mgr.insertMenuItem(menuItem);
                             }
-
-
-                            //fiRec = mgr.getFileInfoTable(fi.Name);
-                            fiRec = mgr.getFileInfoTable(youtubeId);
-                            if (fiRec != null)
-                            {
-                                log($" DUP  line = {line}, date = {taken}, youtubeId = {youtubeId}, title = {miscTitle}");
-
-                            }
-                            else
-                            {
-                                // Insert
-                                fiRec = new FileInfoTable();
-                                fiRec.Name = youtubeId;
-                                fiRec.MediaTypeId = mediaTypeId;
-                                fiRec.CategoryTags = category;
-                                fiRec.MenuTags = menu;
-                                fiRec.AlbumTags = "";
-                                fiRec.FullNameLocal = fi.FullName;
-                                //fiRec.NameAndPath = fileNameAndPath;
-                                fiRec.NameAndPath = line;
-                                fiRec.CreateDateTime = fi.CreationTime;
-                                fiRec.LastModified = fi.LastWriteTime;
-                                fiRec.TakenDateTime = taken;
-                                fiRec.Title = miscTitle;
-                                fiRec.Description = "Description";
-                                fiRec.People = peopleStr;
-                                fiRec.ToBeProcessed = 1;
-                                try
-                                {
-                                    mgr.insertFileInfoTable(fiRec);
-                                }
-                                catch (Exception ex)
-                                {
-                                    log($"{index + 1} of {fileList.Count}, {fi.FullName}  *** Exception on INSERT *** ");
-                                }
-                            }
-
-                            conn.Close();
-                        }
-
-                    }
-                }
                 */
 
-                // Add only supported file types to the list
-                //if (ext.Equals(".JPEG") || ext.Equals(".JPG") || ext.Equals(".PNG") || ext.Equals(".GIF"))
-                //{
-                //}
 
-                // *** need to check for DUPLICATES and how to handle the same image under different categories
-                // *** and how to build the menu structure from DB file info rather than the physical directories
-                /*
-                using (var conn = new MySqlConnection(dbConnStr))
-                {
-                    conn.Open();
-                    mgr.setConnection(conn);
-
-                    // get the MediaCategory Id
-                    mediaCategory = mgr.getMediaCategory(category);
-                    if (mediaCategory == null)
-                    {
-                        throw new Exception($"*** Error: Category {category}, not found in media category table");
-                    }
-
-
-                    menuItem = mgr.getMenuItem(mediaCategory.CategoryId,menu);
-                    if (menuItem == null)
-                    {
-                        menuItem = new Menu();
-                        menuItem.CategoryId = mediaCategory.CategoryId;
-                        menuItem.MenuItem = menu;
-                        menuItem.SearchStr = "";
-                        mgr.insertMenuItem(menuItem);
-                    }
-
-
-                    fiRec = mgr.getFileInfoTable(fi.Name);
-                    if (fiRec != null)
-                    {
-                        // Update
-                        if (!fiRec.CategoryTags.Contains(category))
-                        {
-                            if (!String.IsNullOrEmpty(fiRec.CategoryTags))
-                            {
-                                fiRec.CategoryTags += ",";
-                            }
-                            fiRec.CategoryTags += category;
-                        }
-
-                        if (!fiRec.MenuTags.Contains(menu))
-                        {
-                            if (!String.IsNullOrEmpty(fiRec.MenuTags))
-                            {
-                                fiRec.MenuTags += ",";
-                            }
-                            fiRec.MenuTags += menu;
-                        }
-
-
-                        // category
-                        // menu
-                        // *** get the
-
-
-                        //fiRec.FullNameLocal = fi.FullName;
-                        //fiRec.NameAndPath = fileNameAndPath;
-                        //fiRec.CreateDateTime = fi.CreationTime;
-                        //fiRec.LastModified = fi.LastWriteTime;
-                        fiRec.TakenDateTime = taken;
-                        //fiRec.Title = "Title";
-                        //fiRec.Description = "Description";
-                        if (!String.IsNullOrEmpty(peopleStr))
-                        {
-                            fiRec.People = peopleStr;
-                        }
-                        //fiRec.ToBeProcessed = 1;
-                        mgr.updateFileInfoTable(fiRec);
-                    }
-                    else
-                    {
-                        // Insert
-                        fiRec = new FileInfoTable();
-                        fiRec.Name = fi.Name;
-                        fiRec.MediaTypeId = mediaTypeId;
-                        fiRec.CategoryTags = category;
-                        fiRec.MenuTags = menu;
-                        fiRec.AlbumTags = "";
-                        fiRec.FullNameLocal = fi.FullName;
-                        fiRec.NameAndPath = fileNameAndPath;
-                        fiRec.CreateDateTime = fi.CreationTime;
-                        fiRec.LastModified = fi.LastWriteTime;
-                        fiRec.TakenDateTime = taken;
-                        fiRec.Title = "Title";
-                        fiRec.Description = "Description";
-                        fiRec.People = peopleStr;
-                        fiRec.ToBeProcessed = 1;
-                        try
-                        {
-                            mgr.insertFileInfoTable(fiRec);
-                        }
-                        catch (Exception ex)
-                        {
-                            log($"{index + 1} of {fileList.Count}, {fi.FullName}  *** Exception on INSERT *** ");
-                        }
-                    }
-
-                    conn.Close();
-                }
-                */
 
                 // Increment to the next file if all operations were successful
                 index++;
@@ -1271,6 +1213,8 @@ public class WebSocketController : ControllerBase
 
             // Update LastRunDate with the startDateTime from this run
             //UpdConfigParamValue("LastRunDate", startDateTime);
+
+            //log($"Total # of Fixed = {fixedCnt}");
 
             timer.Stop();
             log($"END elapsed time = {timer.Elapsed.ToString()}");
@@ -1284,11 +1228,167 @@ public class WebSocketController : ControllerBase
     } // private void updateFileInfo()
 
 
-    public void FileTransfer()
+    private void AddMusicAlbum()
     {
         try
         {
-            log($"Beginning of FileTransfer");
+            log($"Beginning of Add Music Album");
+            timer.Start();
+
+            author = configParamDict["AUTHOR"];
+            int mediaTypeId = 3;  // Music
+
+            var mgr = new MediaGalleryRepository(null);
+            MediaTypeTable mediaTypeRec = null;
+            using (var conn = new MySqlConnection(dbConnStr))
+            {
+                conn.Open();
+                mgr.setConnection(conn);
+                mediaTypeRec = mgr.getMediaType(mediaTypeId);
+            }
+
+            if (mediaTypeRec == null)
+            {
+                throw new Exception($"Error: MediaType not found, Id = {mediaTypeId}");
+            }
+
+            //lastRunDate = mediaTypeRec.LastFileTransfer;
+            // Transfer all files
+            lastRunDate = DateTime.Parse("01/01/0001");
+
+            log($"Last Run = {lastRunDate.ToString("MM/dd/yyyy HH:mm:ss")}");
+            var startDateTime = DateTime.Now.ToString("MM/dd/yyyy HH:mm:ss");
+
+            //var rootPath = mediaTypeRec.LocalRoot + mediaTypeRec.MediaTypeDesc;
+            // rootPath = D:/Projects/johnkauflin/public_html/home/Media/Music
+            string category = "Something Else";
+            string menu = "(2005) Rockfest";
+            var rootPath = mediaTypeRec.LocalRoot + "/"+category+"/"+menu;
+
+            log($"rootPath = {rootPath}");
+            var root = new DirectoryInfo(rootPath);
+            fileList.Clear();
+            // Start the recursive function (which will only complete when all subsequent recursive calls are done)
+            WalkDirectoryTree(root, mediaTypeId);
+
+            if (fileList.Count == 0)
+            {
+                log("No new files found");
+                return;
+            }
+
+            FileInfo fi;
+            FileInfoTable fiRec;
+            string fileNameAndPath;
+            string filePath;
+            int pos;
+            string tempStr;
+            DateTime taken;
+            string peopleStr = "";
+            var mediaCategory = new MediaCategory();
+            var menuItem = new Menu();
+            string ext;
+            string youtubeId;
+            string miscTitle;
+
+            string recPath = "";
+            string localPath = "";
+
+            int index = 0;
+            int fixedCnt = 0;
+            while (index < fileList.Count)
+            {
+                fi = (FileInfo)fileList[index];
+                _log.LogInformation($"{index + 1} of {fileList.Count}, {fi.FullName}");
+
+                // Skip files in this directory
+                if (fi.FullName.Contains(".picasaoriginals"))
+                {
+                    index++;
+                    continue;
+                }
+
+                // Don't set NameAndPath
+                filePath = category + "/" + menu + "/";
+                log($"{index + 1} of {fileList.Count}, {fi.Name} ");
+
+                using (var conn = new MySqlConnection(dbConnStr))
+                {
+                    conn.Open();
+                    mgr.setConnection(conn);
+
+                    // get the MediaCategory Id
+                    mediaCategory = mgr.getMediaCategory(mediaTypeId,category);
+                    if (mediaCategory == null)
+                    {
+                        throw new Exception($"*** Error: Category {category}, not found in media category table");
+                    }
+
+                    menuItem = mgr.getMenuItem(mediaCategory.CategoryId, menu);
+                    if (menuItem == null)
+                    {
+                        menuItem = new Menu();
+                        menuItem.CategoryId = mediaCategory.CategoryId;
+                        menuItem.MenuItem = menu;
+                        menuItem.SearchStr = "";
+                        mgr.insertMenuItem(menuItem);
+                    }
+
+                    fiRec = mgr.getFileInfoTable(fi.Name);
+                    // Create a file info record if it does not exist
+                    if (fiRec == null)
+                    {
+                        // Insert
+                        fiRec = new FileInfoTable();
+                        fiRec.Name = fi.Name;
+                        fiRec.MediaTypeId = mediaTypeId;
+                        fiRec.CategoryTags = category;
+                        fiRec.MenuTags = menu;
+                        fiRec.AlbumTags = "";
+                        fiRec.FullNameLocal = fi.FullName;
+                        fiRec.NameAndPath = "";
+                        fiRec.FilePath = filePath;
+                        fiRec.CreateDateTime = fi.CreationTime;
+                        fiRec.LastModified = fi.LastWriteTime;
+                        fiRec.TakenDateTime = fi.CreationTime;
+                        fiRec.Title = fi.Name;
+                        fiRec.Description = "";
+                        fiRec.People = "";
+                        fiRec.ToBeProcessed = 0;
+                        mgr.insertFileInfoTable(fiRec);
+                    }
+
+                    fixedCnt++;
+
+                    conn.Close();
+                } // using (var conn = new MySqlConnection(dbConnStr))
+
+                var tempName = mediaTypeRec.MediaTypeDesc + "/" + filePath + fi.Name;
+                ftpFile(fi.FullName, tempName);
+
+                // Increment to the next file if all operations were successful
+                index++;
+            } // Loop through the file list
+
+            log($"Total # of Fixed = {fixedCnt}");
+
+            timer.Stop();
+            log($"END elapsed time = {timer.Elapsed.ToString()}");
+        }
+        catch (Exception ex)
+        {
+            log($"*** Error: {ex.Message}");
+            log($"END elapsed time = {timer.Elapsed.ToString()}");
+            throw;
+        }
+    } // private void AddMusicAlbum()
+
+
+    public void AllFileTransfer()
+    {
+        try
+        {
+            log($"Beginning of AllFileTransfer");
             timer.Start();
 
             // Get config values from the static dictionary
@@ -1430,16 +1530,16 @@ public class WebSocketController : ControllerBase
 
 
             timer.Stop();
-            log($"END of FileTransfer, elapsed time = {timer.Elapsed.ToString()}");
+            log($"END of AllFileTransfer, elapsed time = {timer.Elapsed.ToString()}");
         }
         catch (Exception ex)
         {
             log($"*** Error: {ex.Message}");
-            log($"END of FileTransfer, elapsed time = {timer.Elapsed.ToString()}");
+            log($"END of AllFileTransfer, elapsed time = {timer.Elapsed.ToString()}");
             throw;
         }
 
-    } // public void FileTransfer()
+    } // public void AllFileTransfer()
 
 
     static async Task HttpGetAsync(string urlParam)
@@ -1450,7 +1550,7 @@ public class WebSocketController : ControllerBase
         //var jsonResponse = await response.Content.ReadAsStringAsync();
     }
 
-    private void WalkDirectoryTree(DirectoryInfo root)
+    private void WalkDirectoryTree(DirectoryInfo root, int mediaTypeId = 1)
     {
         FileInfo[] files = null;
         DirectoryInfo[] subDirs = null;
@@ -1477,22 +1577,40 @@ public class WebSocketController : ControllerBase
 
         if (files != null)
         {
+            bool validType = false;
             string ext;
             foreach (FileInfo fi in files)
             {
                 ext = fi.Extension.ToUpper();
                 // Add only supported file types to the list
-                if (ext.Equals(".JPEG") || ext.Equals(".JPG") || ext.Equals(".PNG") || ext.Equals(".GIF"))
-                //if (ext.Equals(".JPEG") || ext.Equals(".JPG") || ext.Equals(".PNG") || ext.Equals(".GIF") || ext.Equals(".TXT"))
-                //if (ext.Equals(".MP3"))
+
+                validType = false;
+                if (mediaTypeId == 1)
                 {
-                    if (fi.LastWriteTime > lastRunDate)
+                    if (ext.Equals(".JPEG") || ext.Equals(".JPG") || ext.Equals(".PNG") || ext.Equals(".GIF"))
+                    //if (ext.Equals(".JPEG") || ext.Equals(".JPG") || ext.Equals(".PNG") || ext.Equals(".GIF") || ext.Equals(".TXT"))
                     {
-                        //log($"Adding file = {fi.Name}");
-                        //fileCnt++;
-                        fileList.Add(fi);
+                        validType = true;
                     }
                 }
+                else if (mediaTypeId == 2)
+                {
+                } 
+                else if (mediaTypeId == 3)
+                {
+                    if (ext.Equals(".MP3"))
+                    {
+                        validType |= true;
+                    }
+                }
+
+                if (fi.LastWriteTime > lastRunDate && validType)
+                {
+                    //log($"Adding file = {fi.Name}");
+                    //fileCnt++;
+                    fileList.Add(fi);
+                }
+
             } // foreach (FileInfo fi in files)
 
             // Now find all the subdirectories under this directory.
