@@ -57,6 +57,7 @@
  * 2023-08-18 JJK   Uncommented Update File Info to work on fixes like
  *                  bad paths
  * 2024-01-14 JJK   Implement a screen up upload a music album
+ * 2024-03-03 JJK   Implemented upload of smaller images to Azure blob storage
  *============================================================================*/
 using System.Collections;
 using System.Diagnostics;
@@ -75,6 +76,7 @@ using static System.Net.Mime.MediaTypeNames;
 using ExifLibrary;
 using System;
 using Microsoft.AspNetCore.Mvc.Formatters;
+using Azure.Storage.Blobs;
 
 namespace MediaGalleryAdmin.Controllers;
 
@@ -86,6 +88,10 @@ public class WebSocketController : ControllerBase
     private static readonly Stopwatch timer = new Stopwatch();
     private static WebSocket? webSocket;
     private static string? dbConnStr;
+
+    private static string? photosBlobStorageConnStr;
+    private static string? photosBlobStorageContainerName;
+
     //private static System.Collections.Specialized.StringCollection log = new System.Collections.Specialized.StringCollection();
     private static DateTime lastRunDate;
     private static ArrayList fileList = new ArrayList();
@@ -198,6 +204,9 @@ public class WebSocketController : ControllerBase
             _log.LogInformation(">>> Accepting WebSocket request");
             webSocket = await HttpContext.WebSockets.AcceptWebSocketAsync();
             dbConnStr = _configuration["dbConnStr"];
+            photosBlobStorageConnStr = _configuration["photosBlobStorageConnStr"];
+            photosBlobStorageContainerName = _configuration["photosBlobStorageContainerName"];
+
             LoadConfigParam();
             if (configParamDict.Count == 0)
             {
@@ -215,6 +224,7 @@ public class WebSocketController : ControllerBase
             else if (taskName.Equals("UpdateFileInfo"))
             {
                 UpdateFileInfo();
+                //ExtractFileInfoData();
             }
             else if (taskName.Equals("AddMusicAlbum"))
             {
@@ -889,7 +899,7 @@ public class WebSocketController : ControllerBase
     }
 
 
-    private void UpdateFileInfo()
+    private async void UpdateFileInfo()
     {
         try
         {
@@ -924,13 +934,15 @@ public class WebSocketController : ControllerBase
 
             //lastRunDate = mediaTypeRec.LastFileTransfer;
             // For TESTING
-            lastRunDate = DateTime.Parse("08/01/0001");
+            lastRunDate = DateTime.Parse("01/01/0001");
 
             log($"Last Run = {lastRunDate.ToString("MM/dd/yyyy HH:mm:ss")}");
             var startDateTime = DateTime.Now.ToString("MM/dd/yyyy HH:mm:ss");
 
-            var rootPath = mediaTypeRec.LocalRoot + mediaTypeRec.MediaTypeDesc;
+            //var rootPath = mediaTypeRec.LocalRoot + mediaTypeRec.MediaTypeDesc;
             //var rootPath = "C:\\Users\\johnk\\PhotosTEMP\\Ollie";
+            var rootPath = "C:/Users/johnk/Downloads/PhotosSmaller";
+
             var root = new DirectoryInfo(rootPath);
             fileList.Clear();
             // Start the recursive function (which will only complete when all subsequent recursive calls are done)
@@ -964,6 +976,7 @@ public class WebSocketController : ControllerBase
 
             string recPath = "";
             string localPath = "";
+
 
             int fixedCnt = 0;
             while (index < fileList.Count)
@@ -1000,6 +1013,28 @@ public class WebSocketController : ControllerBase
                 //ext = fi.Extension.ToUpper();
                 log($"{index + 1} of {fileList.Count}, {fi.Name} ");
 
+                var container = new BlobContainerClient(photosBlobStorageConnStr, photosBlobStorageContainerName);
+                //var blob = container.GetBlobClient("nature.jpg");
+                var blob = container.GetBlobClient(fi.Name);
+                //blob.SetMetadata
+                //blob.SetTags
+                if (!blob.Exists())
+                {
+                    //var stream = System.IO.File.OpenRead("nature.jpg");
+                    var stream = System.IO.File.OpenRead(fi.FullName);
+                    await blob.UploadAsync(stream);
+                }
+
+                /*
+                1 of 27580, 1987-01 001.jpg 
+                                Azure.RequestFailedException: 'The specified blob already exists.
+                RequestId:9d0b3a7b-701e-002e-084c-6e964c000000
+                Time:2024-03-04T15:57:25.9926983Z
+                Status: 409 (The specified blob already exists.)
+                ErrorCode: BlobAlreadyExists
+                */
+
+                /*
                 using (var conn = new MySqlConnection(dbConnStr))
                 {
                     conn.Open();
@@ -1019,7 +1054,7 @@ public class WebSocketController : ControllerBase
                     }
                     conn.Close();
                 } // using (var conn = new MySqlConnection(dbConnStr))
-
+                */
 
 
                 //var tempName = mediaTypeRec.MediaTypeDesc + "/" + filePath + fi.Name;
@@ -1261,8 +1296,9 @@ public class WebSocketController : ControllerBase
 
             //var rootPath = mediaTypeRec.LocalRoot + mediaTypeRec.MediaTypeDesc;
             // rootPath = D:/Projects/johnkauflin/public_html/home/Media/Music
-            string category = "Something Else";
-            string menu = "(2005) Rockfest";
+            //string category = "Something Else";
+            string category = "Phil N the Blanks";
+            string menu = "(1984) 06-01 Live";
             var rootPath = mediaTypeRec.LocalRoot + "/"+category+"/"+menu;
 
             log($"rootPath = {rootPath}");
@@ -1383,6 +1419,54 @@ public class WebSocketController : ControllerBase
         }
     } // private void AddMusicAlbum()
 
+    public void ExtractFileInfoData()
+    {
+        try
+        {
+            log($"Beginning of ExtractFileInfoData");
+            timer.Start();
+
+            int maxRows = 100;
+            int index = 0;
+            int index2 = 0;
+            int tempCnt = 0;
+            int retryCnt = 0;
+            int maxRetry = 3;
+            var mgr = new MediaGalleryRepository(null);
+            List<FileInfoTable> fileInfoTableList;
+            FileInfoTable fiRec;
+            bool done = false;
+            bool done2 = false;
+            string createThumbnailUrl;
+
+            int mediaTypeId = 2;
+            // Get a set of files to process from the database
+            using (var conn = new MySqlConnection(dbConnStr))
+            {
+                conn.Open();
+                mgr.setConnection(conn);
+                fileInfoTableList = mgr.getFileInfoTableList2(mediaTypeId);
+            }
+
+            index2 = 0;
+            while (index2 < fileInfoTableList.Count)
+            //foreach (var fiRec in fileInfoTableList)
+            {
+                fiRec = (FileInfoTable)fileInfoTableList[index2];
+                log($"{index + 1}, {index2 + 1}, {fiRec.NameAndPath}");
+
+            }
+
+            timer.Stop();
+            log($"END, elapsed time = {timer.Elapsed.ToString()}");
+        }
+        catch (Exception ex)
+        {
+            log($"*** Error: {ex.Message}");
+            log($"END, elapsed time = {timer.Elapsed.ToString()}");
+            throw;
+        }
+    } 
 
     public void AllFileTransfer()
     {

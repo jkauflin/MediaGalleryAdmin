@@ -155,10 +155,16 @@ namespace MediaGalleryAdmin.Model
         }
 
 
-
         public List<FileInfoTable> getFileInfoTableList(int maxRows = 100)
         {
             string sql = String.Format($"SELECT * FROM FileInfo WHERE ToBeProcessed > 0 LIMIT {maxRows}; ");
+            //Console.WriteLine("${DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}, sql = {sql}");
+
+            return conn.Query<FileInfoTable>(sql).AsList();
+        }
+        public List<FileInfoTable> getFileInfoTableList2(int mediaTypeId = 2)
+        {
+            string sql = String.Format($"SELECT * FROM FileInfo WHERE MediaTypeId = {mediaTypeId}; ");
             //Console.WriteLine("${DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}, sql = {sql}");
 
             return conn.Query<FileInfoTable>(sql).AsList();
